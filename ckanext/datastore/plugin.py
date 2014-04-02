@@ -31,6 +31,7 @@ class DatastorePlugin(p.SingletonPlugin):
     resource_show_action = None
 
     def configure(self, config):
+        print 'ds'
         self.config = config
         # check for ckan.datastore.write_url and ckan.datastore.read_url
         if (not 'ckan.datastore.write_url' in config):
@@ -176,12 +177,17 @@ class DatastorePlugin(p.SingletonPlugin):
         return True
 
     def _create_alias_table(self):
+
+        # TODO: Add case, if mat view shouldn't have an alias
+
         mapping_sql = '''
-            SELECT DISTINCT
+            SELECT DISTINCT ON (dependee.oid)
                 substr(md5(dependee.relname || COALESCE(dependent.relname, '')), 0, 17) AS "_id",
                 dependee.relname AS name,
                 dependee.oid AS oid,
-                dependent.relname AS alias_of
+                CASE WHEN dependee.relkind='m' THEN NULL
+                  ELSE dependent.relname
+                END AS alias_of
                 -- dependent.oid AS oid
             FROM
                 pg_class AS dependee
@@ -191,7 +197,8 @@ class DatastorePlugin(p.SingletonPlugin):
             WHERE
                 (dependee.oid != dependent.oid OR dependent.oid IS NULL) AND
                 (dependee.relname IN (SELECT tablename FROM pg_catalog.pg_tables)
-                    OR dependee.relname IN (SELECT viewname FROM pg_catalog.pg_views)) AND
+                    OR dependee.relname IN (SELECT viewname FROM pg_catalog.pg_views)
+                    OR dependee.relname IN (SELECT matviewname FROM pg_catalog.pg_matviews)) AND
                 dependee.relnamespace = (SELECT oid FROM pg_namespace WHERE nspname='public')
             ORDER BY dependee.oid DESC;
         '''

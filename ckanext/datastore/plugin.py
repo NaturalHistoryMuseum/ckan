@@ -31,7 +31,6 @@ class DatastorePlugin(p.SingletonPlugin):
     resource_show_action = None
 
     def configure(self, config):
-        print 'ds'
         self.config = config
         # check for ckan.datastore.write_url and ckan.datastore.read_url
         if (not 'ckan.datastore.write_url' in config):

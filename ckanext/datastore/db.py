@@ -918,7 +918,7 @@ def search_data(context, data_dict):
 
     sort = _sort(context, data_dict, field_ids)
 
-    sql_string = u'''SELECT {select}, count(*) over() AS "_full_count" {rank}
+    sql_string = u'''SELECT {select}, (SELECT count(*) FROM "{resource}") AS "_full_count" {rank}
                     FROM "{resource}" {ts_query}
                     {where} {sort} LIMIT {limit} OFFSET {offset}'''.format(
         select=select_columns,

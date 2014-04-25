@@ -14,6 +14,7 @@ import distutils.version
 import sqlalchemy
 from sqlalchemy.exc import (ProgrammingError, IntegrityError,
                             DBAPIError, DataError)
+
 from sqlalchemy.sql import text
 import psycopg2.extras
 import ckan.lib.cli as cli

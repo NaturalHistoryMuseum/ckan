@@ -14,6 +14,7 @@ import distutils.version
 import sqlalchemy
 from sqlalchemy.exc import (ProgrammingError, IntegrityError,
                             DBAPIError, DataError)
+from sqlalchemy.sql import text
 import psycopg2.extras
 import ckan.lib.cli as cli
 import ckan.plugins.toolkit as toolkit
@@ -755,15 +756,18 @@ def _where(field_ids, data_dict):
         )
 
     where_clauses = []
-    values = []
+    values = {}
 
     for field, value in filters.iteritems():
         if field not in field_ids:
             raise ValidationError({
                 'filters': ['field "{0}" not in table'.format(field)]}
             )
-        where_clauses.append(u'"{0}" = %s'.format(field))
-        values.append(value)
+
+        # Ensure field names do not clash with other field formatters
+        value_key = '_{0}'.format(field)
+        where_clauses.append(u'"{0}" = :{1}'.format(field, value_key))
+        values[value_key] = value
 
     # add full-text search where clause
     if data_dict.get('q'):
@@ -776,17 +780,15 @@ def _where(field_ids, data_dict):
 
 
 def _textsearch_query(data_dict):
-    q = data_dict.get('q')
-    lang = data_dict.get(u'language', u'english')
-    if q:
-        if data_dict.get('plain', True):
-            statement = u", plainto_tsquery('{lang}', '{query}') query"
-        else:
-            statement = u", to_tsquery('{lang}', '{query}') query"
 
-        rank_column = u', ts_rank(_full_text, query, 32) AS rank'
-        return statement.format(lang=lang, query=q), rank_column
-    return '', ''
+    lang = data_dict.get(u'language', u'english')
+
+    if data_dict.get('plain', True):
+        statement = u"plainto_tsquery('{lang}', '{query}')"
+    else:
+        statement = u"to_tsquery('{lang}', '{query}')"
+
+    return statement.format(lang=lang, query=data_dict.get('q'))
 
 
 def _sort(context, data_dict, field_ids):
@@ -903,10 +905,27 @@ def search_data(context, data_dict):
 
     select_columns = ', '.join([u'"{0}"'.format(field_id)
                                 for field_id in field_ids])
-    ts_query, rank_column = _textsearch_query(data_dict)
+
+    select_from = ['"{0}"'.format(data_dict['resource_id'])]
+
     where_clause, where_values = _where(all_field_ids, data_dict)
+
+    count = 'SELECT count(1) FROM "{resource}" {where}'.format(
+        resource=data_dict['resource_id'],
+        where=where_clause)
+
+    if data_dict.get('q'):
+        select_columns += ', ts_rank(_full_text, query, 32) AS rank'
+        ts_query = _textsearch_query(data_dict)
+        select_from.append('{0} query'.format(ts_query))
+        count = count.replace('@@ query', '@@ {0}'.format(ts_query))
+
     limit = data_dict.get('limit', 100)
     offset = data_dict.get('offset', 0)
+
+    # TODO: Gets called twice - first time without a count
+    if not limit:
+        limit = 100
 
     _validate_int(limit, 'limit', non_negative=True)
     _validate_int(offset, 'offset', non_negative=True)
@@ -918,20 +937,18 @@ def search_data(context, data_dict):
 
     sort = _sort(context, data_dict, field_ids)
 
-    sql_string = u'''SELECT {select}, (SELECT count(*) FROM "{resource}") AS "_full_count" {rank}
-                    FROM "{resource}" {ts_query}
-                    {where} {sort} LIMIT {limit} OFFSET {offset}'''.format(
+    sql_string = u'''SELECT {select}, ({count}) AS _full_count
+                     FROM {select_from}
+                     {where} {sort} LIMIT {limit} OFFSET {offset}'''.format(
         select=select_columns,
-        rank=rank_column,
-        resource=data_dict['resource_id'],
-        ts_query=ts_query,
-        where='{where}',
+        count=count,
+        select_from=', '.join(select_from),
+        where=where_clause,
         sort=sort,
         limit=limit,
         offset=offset)
-    sql_string = sql_string.replace('%', '%%')
-    results = context['connection'].execute(
-        sql_string.format(where=where_clause), [where_values])
+
+    results = context['connection'].execute(text(sql_string), where_values)
 
     _insert_links(data_dict, limit, offset)
     return format_results(context, results, data_dict)

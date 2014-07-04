@@ -6,6 +6,8 @@ import datetime
 import sys
 from pprint import pprint
 import re
+import ckan.logic as logic
+import ckan.model as model
 import ckan.include.rjsmin as rjsmin
 import ckan.include.rcssmin as rcssmin
 import ckan.lib.fanstatic_resources as fanstatic_resources
@@ -101,6 +103,21 @@ class CkanCommand(paste.script.command.Command):
         self.translator_obj = MockTranslator()
         self.registry.register(pylons.translator, self.translator_obj)
 
+        if model.user_table.exists():
+            # If the DB has already been initialized, create and register
+            # a pylons context object, and add the site user to it, so the
+            # auth works as in a normal web request
+            c = pylons.util.AttribSafeContextObj()
+
+            self.registry.register(pylons.c, c)
+
+            self.site_user = logic.get_action('get_site_user')({'ignore_auth': True,
+                'defer_commit': True}, {})
+
+            pylons.c.user = self.site_user['name']
+            pylons.c.userobj = model.User.get(self.site_user['name'])
+            model.repo.commit_and_remove()
+
         ## give routes enough information to run url_for
         parsed = urlparse.urlparse(conf.get('ckan.site_url', 'http://0.0.0.0'))
         request_config = routes.request_config()
@@ -144,6 +161,7 @@ class ManageDb(CkanCommand):
 
         cmd = self.args[0]
         if cmd == 'init':
+
             model.repo.init_db()
             if self.verbose:
                 print 'Initialising DB: SUCCESS'
@@ -373,7 +391,7 @@ class SearchIndexCommand(CkanCommand):
     Usage:
       search-index [-i] [-o] [-r] [-e] rebuild [dataset_name]  - reindex dataset_name if given, if not then rebuild
                                                                  full search index (all datasets)
-      search-index rebuild_fast                                - reindex using multiprocessing using all cores. 
+      search-index rebuild_fast                                - reindex using multiprocessing using all cores.
                                                                  This acts in the same way as rubuild -r [EXPERIMENTAL]
       search-index check                                       - checks for datasets not indexed
       search-index show DATASET_NAME                           - shows index of a dataset
@@ -730,7 +748,7 @@ class UserCmd(CkanCommand):
     def list(self):
         import ckan.model as model
         print 'Users:'
-        users = model.Session.query(model.User)
+        users = model.Session.query(model.User).filter_by(state = 'active')
         print 'count = %i' % users.count()
         for user in users:
             print self.get_user_str(user)

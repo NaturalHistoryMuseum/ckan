@@ -300,7 +300,8 @@ def package_update(context, data_dict):
                 # to ensure they still work.
                 package_plugin.check_data_dict(data_dict)
 
-    data, errors = _validate(data_dict, schema, context)
+    data, errors = lib_plugins.plugin_validate(
+        package_plugin, context, data_dict, schema, 'package_update')
     log.debug('package_update validate_errs=%r user=%s package=%s data=%r',
               errors, context.get('user'),
               context.get('package').name if context.get('package') else '',
@@ -502,7 +503,9 @@ def _group_or_org_update(context, data_dict, is_org=False):
         except TypeError:
             group_plugin.check_data_dict(data_dict)
 
-    data, errors = _validate(data_dict, schema, context)
+    data, errors = lib_plugins.plugin_validate(
+        group_plugin, context, data_dict, schema,
+        'organization_update' if is_org else 'group_update')
     log.debug('group_update validate_errs=%r user=%s group=%s data_dict=%r',
               errors, context.get('user'),
               context.get('group').name if context.get('group') else '',
@@ -520,14 +523,8 @@ def _group_or_org_update(context, data_dict, is_org=False):
     else:
         rev.message = _(u'REST API: Update object %s') % data.get("name")
 
-    # when editing an org we do not want to update the packages if using the
-    # new templates.
-    if ((not is_org)
-            and not converters.asbool(
-                config.get('ckan.legacy_templates', False))
-            and 'api_version' not in context):
-        context['prevent_packages_update'] = True
-    group = model_save.group_dict_save(data, context)
+    group = model_save.group_dict_save(data, context,
+        prevent_packages_update=is_org)
 
     if is_org:
         plugin_type = plugins.IOrganizationController
@@ -614,6 +611,9 @@ def organization_update(context, data_dict):
 
     :param id: the name or id of the organization to update
     :type id: string
+    :param packages: ignored. use
+        :py:func:`~ckan.logic.action.update.package_owner_org_update`
+        to change package ownership
 
     :returns: the updated organization
     :rtype: dictionary

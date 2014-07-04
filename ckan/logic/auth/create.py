@@ -9,11 +9,17 @@ def package_create(context, data_dict=None):
     user = context['user']
 
     if new_authz.auth_is_anon_user(context):
-        check1 = new_authz.check_config_permission('anon_create_dataset')
+        check1 = all(new_authz.check_config_permission(p) for p in (
+            'anon_create_dataset',
+            'create_dataset_if_not_in_organization',
+            'create_unowned_dataset',
+            ))
     else:
-        check1 = new_authz.check_config_permission('create_dataset_if_not_in_organization') \
-            or new_authz.check_config_permission('create_unowned_dataset') \
-            or new_authz.has_user_permission_for_some_org(user, 'create_dataset')
+        check1 = all(new_authz.check_config_permission(p) for p in (
+            'create_dataset_if_not_in_organization',
+            'create_unowned_dataset',
+            )) or new_authz.has_user_permission_for_some_org(
+            user, 'create_dataset')
 
     if not check1:
         return {'success': False, 'msg': _('User %s not authorized to create packages') % user}
@@ -121,8 +127,8 @@ def user_create(context, data_dict=None):
             'create users')}
     return {'success': True}
 
-def user_invite(context, data_dict=None):
-    context['id'] = context.get('group_id')
+def user_invite(context, data_dict):
+    data_dict['id'] = data_dict['group_id']
     return group_member_create(context, data_dict)
 
 def _check_group_auth(context, data_dict):

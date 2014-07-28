@@ -64,6 +64,9 @@ this.ckan.module('recline_view', function (jQuery, _) {
         $.each(filters, function (field,values) {
           query.addFilter({type: 'term', field: field, term: values});
         });
+        if (window.parent.ckan.views.filters.getFullText()){
+          query.set({ q: window.parent.ckan.views.filters.getFullText()});
+        }
       }
 
       dataset.query(query);
@@ -112,7 +115,21 @@ this.ckan.module('recline_view', function (jQuery, _) {
         view = this._newDataExplorer(dataset);
       } else {
         // default to Grid
-        view = new recline.View.SlickGrid({model: dataset});
+
+        if (reclineView.state === undefined) {
+            reclineView.state = {}
+        }else{
+            // Loop through all properties that could be functions
+            // If they are defined, convert to func
+            $.each(['defaultFormatter', 'formatterFactory', 'editorFactory'], function(i, value){
+                if(reclineView.state['gridOptions'][value] !== undefined){
+                    // String to func
+                    reclineView.state['gridOptions'][value] = window[reclineView.state['gridOptions'][value]];
+                }
+            });
+        }
+
+        view = new recline.View.SlickGrid({model: dataset, state: reclineView.state});
         controls = [
           new recline.View.Pager({model: view.model}),
           new recline.View.RecordCount({model: dataset}),

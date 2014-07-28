@@ -3447,6 +3447,33 @@ my.SlickGrid = Backbone.View.extend({
     _.bindAll(this, 'render', 'onRecordChanged');
     this.listenTo(this.model.records, 'add remove reset', this.render);
     this.listenTo(this.model.records, 'change', this.onRecordChanged);
+
+    this.listenTo(this.model, 'query:start', function() {
+      self.notify({loader: true, persist: true});
+    });
+
+    this.listenTo(this.model, 'query:done', function() {
+      self.clearNotifications();
+    });
+
+    this.listenTo(this.model, 'query:fail', function(error) {
+      self.clearNotifications();
+      var msg = '';
+      if (typeof(error) == 'string') {
+        msg = error;
+      } else if (typeof(error) == 'object') {
+        if (error.title) {
+          msg = error.title + ': ';
+        }
+        if (error.message) {
+          msg += error.message;
+        }
+      } else {
+        msg = 'There was an error querying the backend';
+      }
+      self.notify({message: msg, category: 'error', persist: true});
+    });
+
     var state = _.extend({
         hiddenColumns: [],
         columnsOrder: [],
@@ -3498,17 +3525,22 @@ my.SlickGrid = Backbone.View.extend({
     // custom formatter as default one escapes html
     // plus this way we distinguish between rendering/formatting and computed value (so e.g. sort still works ...)
     // row = row index, cell = cell index, value = value, columnDef = column definition, dataContext = full row values
-    var formatter = function(row, cell, value, columnDef, dataContext) {
-      if(columnDef.id == "del"){
-        return self.templates.deleterow 
-	}
-	var field = self.model.fields.get(columnDef.id);
-      if (field.renderer) {
-        return  field.renderer(value, field, dataContext);
-      }else {
-        return  value 
-      }
-    };
+    var formatter;
+    // Only define the formatter if there's no formatter factory defined
+    if(!('defaultFormatter' in options || 'formatterFactory' in options)){
+        formatter = function(row, cell, value, columnDef, dataContext) {
+          if(columnDef.id == "del"){
+            return self.templates.deleterow
+        }
+        var field = self.model.fields.get(columnDef.id);
+          if (field.renderer) {
+            return  field.renderer(value, field, dataContext);
+          }else {
+            return  value
+          }
+        };
+    }
+
     // we need to be sure that user is entering a valid  input , for exemple if 
     // field is date type and field.format ='YY-MM-DD', we should be sure that 
     // user enter a correct value 
@@ -3825,7 +3857,50 @@ my.SlickGrid = Backbone.View.extend({
 
   hide: function() {
     this.visible = false;
+  },
+
+  notify: function(flash) {
+    var tmplData = _.extend({
+      message: 'Loading',
+      category: 'warning',
+      loader: true
+      },
+      flash
+    );
+    var _template;
+    if (tmplData.loader) {
+      _template = ' \
+        <div class="alert alert-info alert-loader"> \
+          {{message}} \
+          <span class="notification-loader">&nbsp;</span> \
+        </div>';
+    } else {
+      _template = ' \
+        <div class="alert alert-{{category}} fade in" data-alert="alert"><a class="close" data-dismiss="alert" href="#">×</a> \
+          {{message}} \
+        </div>';
+    }
+    var _templated = $(Mustache.render(_template, tmplData));
+    _templated = $(_templated).appendTo($('.controls'));
+    if (!flash.persist) {
+      setTimeout(function() {
+        $(_templated).fadeOut(1000, function() {
+          $(this).remove();
+        });
+      }, 1000);
+    }
+  },
+
+  // ### clearNotifications
+  //
+  // Clear all existing notifications
+  clearNotifications: function() {
+    var $notifications = $('.controls .alert');
+    $notifications.fadeOut(1500, function() {
+      $(this).remove();
+    });
   }
+
 });
 
 })(jQuery, recline.View);

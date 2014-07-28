@@ -98,8 +98,11 @@ this.ckan.views.filters = (function (queryString) {
 
   var api = {
     get: get,
+    getFullText: getFullText,
     set: set,
+    setFullText: setFullText,
     setAndRedirectTo: setAndRedirectTo,
+    setFullTextAndRedirectTo: setFullTextAndRedirectTo,
     unset: unset,
     _searchParams: {},
     _initialize: _initialize,
@@ -116,15 +119,33 @@ this.ckan.views.filters = (function (queryString) {
     }
   }
 
+  function getFullText(){
+    return api._searchParams.q || null;
+  }
+
   function set(name, value) {
     var url = window.location.href;
 
     setAndRedirectTo(name, value, url);
   }
 
+  function setFullText(q){
+    var url = window.location.href;
+
+    setFullTextAndRedirectTo(q, url);
+  }
+
   function setAndRedirectTo(name, value, url) {
     api._searchParams.filters = api._searchParams.filters || {};
     api._searchParams.filters[name] = value;
+
+    _redirectTo(url);
+
+    return api;
+  }
+
+  function setFullTextAndRedirectTo(q, url){
+    api._searchParams.q = q;
 
     _redirectTo(url);
 

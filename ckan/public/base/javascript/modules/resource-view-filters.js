@@ -113,7 +113,7 @@ this.ckan.module('resource-view-filters', function (jQuery, _) {
 
             if (term !== '') {
               var q = {};
-              q[filterName] = "'" + term.replace("'", "") + "':*";
+              q[filterName] = term + ':*';
               query.q = JSON.stringify(q);
             }
 

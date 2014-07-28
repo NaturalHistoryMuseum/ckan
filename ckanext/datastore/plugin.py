@@ -416,7 +416,7 @@ class DatastorePlugin(p.SingletonPlugin):
         return clauses
 
     def _is_array_type(self, field_type):
-                return field_type.startswith('_')
+        return field_type.startswith('_')
 
     def _sort(self, data_dict, fields_types):
         sort = data_dict.get('sort')

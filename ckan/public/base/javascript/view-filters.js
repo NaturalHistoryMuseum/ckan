@@ -50,6 +50,9 @@ String.prototype.queryStringToJSON = String.prototype.queryStringToJSON || funct
         key = decodeURIComponent(key);
         value = decodeURIComponent(value);
 
+        // Semi colons are reserved character for query params - encode them
+        value = value.replace(/;/g, "%3B");
+
         // Set
         // window.console.log({'key':key,'value':value}, split);
         var keys = key.split('.');

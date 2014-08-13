@@ -919,7 +919,7 @@ def search_data(context, data_dict):
     else:
         sort_clause = ''
 
-    sql_string = u'''SELECT {distinct} {select}
+    sql_string = u'''SELECT {distinct} {select}, (SELECT count(*) FROM "{resource}" {ts_query} {where}) AS "_full_count"
                     FROM "{resource}" {ts_query}
                     {where} {sort} LIMIT {limit} OFFSET {offset}'''.format(
         distinct=distinct,
@@ -931,7 +931,7 @@ def search_data(context, data_dict):
         limit=limit,
         offset=offset)
 
-    results = _execute_single_statement(context, sql_string, where_values)
+    results = _execute_single_statement(context, sql_string, where_values*2)
 
     _insert_links(data_dict, limit, offset)
     return format_results(context, results, data_dict)

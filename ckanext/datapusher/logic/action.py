@@ -153,8 +153,7 @@ def datapusher_hook(context, data_dict):
 
     task['state'] = status
     task['last_updated'] = str(datetime.datetime.now())
-
-    if status == 'complete' and p.plugin_loaded('recline_grid_view'):
+    if status == 'complete' and (p.plugin_loaded('recline_grid_view') or p.plugin_loaded('recline_grid')):
         view_list = p.toolkit.get_action(
             'resource_view_list')(context, {'id': res_id})
 

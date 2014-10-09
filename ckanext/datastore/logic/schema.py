@@ -69,7 +69,12 @@ def unicode_or_json_validator(value, context):
     try:
         if value is None:
             return value
-        return json_validator(value, context)
+        v = json_validator(value, context)
+        # json.loads will parse literals; however we want literals as unicode.
+        if not isinstance(v, dict):
+            return value
+        else:
+            return v
     except df.Invalid:
         return unicode(value)
 

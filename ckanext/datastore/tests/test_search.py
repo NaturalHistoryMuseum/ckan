@@ -53,6 +53,56 @@ class TestDatastoreSearchNewTest(object):
         assert_equals(len(result['records']), 2)
         assert_equals(len(set(ranks)), 1)
 
+    def test_fts_works_on_non_textual_fields(self):
+        resource = factories.Resource()
+        data = {
+            'resource_id': resource['id'],
+            'force': True,
+            'records': [
+                {'from': 'Brazil', 'year': {'foo': 2014}},
+                {'from': 'Brazil', 'year': {'foo': 1986}}
+            ],
+        }
+        result = helpers.call_action('datastore_create', **data)
+        search_data = {
+            'resource_id': resource['id'],
+            'fields': 'year',
+            'plain': False,
+            'q': {
+                'year': '20:*'
+            },
+        }
+        result = helpers.call_action('datastore_search', **search_data)
+        assert_equals(len(result['records']), 1)
+        assert_equals(result['records'][0]['year'], {'foo': 2014})
+
+    def test_all_params_work_with_fields_with_whitespaces(self):
+        resource = factories.Resource()
+        data = {
+            'resource_id': resource['id'],
+            'force': True,
+            'records': [
+                {'the year': 2014},
+                {'the year': 2013},
+            ],
+        }
+        result = helpers.call_action('datastore_create', **data)
+        search_data = {
+            'resource_id': resource['id'],
+            'fields': 'the year',
+            'sort': 'the year',
+            'filters': {
+                'the year': 2013
+            },
+            'q': {
+                'the year': '2013'
+            },
+        }
+        result = helpers.call_action('datastore_search', **search_data)
+        result_years = [r['the year'] for r in result['records']]
+        assert_equals(result_years, [2013])
+
+
 
 class TestDatastoreSearch(tests.WsgiAppCase):
     sysadmin_user = None
@@ -709,13 +759,13 @@ class TestDatastoreSQL(tests.WsgiAppCase):
             name='test_org',
             apikey=cls.sysadmin_user.apikey)
 
-        cls.expected_records = [{u'_full_text': u"'annakarenina':1 'b':3 'moo':4 'tolstoy':2",
+        cls.expected_records = [{u'_full_text': u"'-01':3 '-03':2 '2005':1 'annakarenina':7 'b':6 'moo':4 'tolstoy':5",
                                  u'_id': 1,
                                  u'author': u'tolstoy',
                                  u'b\xfck': u'annakarenina',
                                  u'nested': [u'b', {u'moo': u'moo'}],
                                  u'published': u'2005-03-01T00:00:00'},
-                                {u'_full_text': u"'b':3 'tolstoy':2 'warandpeac':1",
+                                {u'_full_text': u"'b':4 'tolstoy':3 'warandpeac':2",
                                  u'_id': 2,
                                  u'author': u'tolstoy',
                                  u'b\xfck': u'warandpeace',

@@ -334,16 +334,22 @@ class DatastorePlugin(p.SingletonPlugin):
     def _parse_sort_clause(self, clause, fields_types):
         clause = clause.encode('utf-8')
 
+        sort = u'asc'
         if len(clause) > 4 and clause[-4:].lower() == ' asc':
             clause = clause[0:-4]
         elif len(clause) > 5 and clause[-5:].lower() == ' desc':
+            sort = u'desc'
             clause = clause[0:-5]
 
         # For backward compatibility, assume the field may be quoted
         if clause.startswith('"') and clause.endswith('"') and len(clause) > 2:
             clause = clause[1:-1]
 
-        return unicode(clause, 'utf-8') in fields_types
+        field = unicode(clause, 'utf-8')
+        if field in fields_types:
+            return field, sort
+        else:
+            return False
 
     def datastore_delete(self, context, data_dict, fields_types, query_dict):
         query_dict['where'] += self._where(data_dict, fields_types)

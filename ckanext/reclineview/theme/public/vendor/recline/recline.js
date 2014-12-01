@@ -3479,6 +3479,8 @@ my.SlickGrid = Backbone.View.extend({
         columnsOrder: [],
         columnsSort: {},
         columnsWidth: [],
+        columnsTitle: [],
+        columnsToolTip: [],
         columnsEditor: [],
         options: {},
         fitColumns: false
@@ -3606,6 +3608,14 @@ my.SlickGrid = Backbone.View.extend({
       var widthInfo = _.find(self.state.get('columnsWidth'),function(c){return c.column === field.id;});
       if (widthInfo){
         column.width = widthInfo.width;
+      }
+      var titleInfo = _.find(self.state.get('columnsTitle'),function(c){return c.column === field.id;});
+      if (titleInfo){
+        column.name = titleInfo.title;
+      }
+      var toolTipInfo = _.find(self.state.get('columnsToolTip'),function(c){return c.column === field.id;});
+      if (toolTipInfo) {
+          column.toolTip = toolTipInfo.value;
       }
       var editInfo = _.find(self.state.get('columnsEditor'),function(c){return c.column === field.id;});
       if (editInfo){

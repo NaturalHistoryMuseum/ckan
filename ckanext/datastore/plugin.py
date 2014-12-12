@@ -2,6 +2,7 @@ import sys
 import logging
 import shlex
 import re
+import time
 
 import pylons
 import sqlalchemy.engine.url as sa_url
@@ -182,7 +183,8 @@ class DatastorePlugin(p.SingletonPlugin):
         write_connection.execute(drop_foo_sql)
 
         try:
-            write_connection.execute(u'CREATE TEMP TABLE _foo ()')
+            write_connection.execute(u'CREATE TABLE _foo ()')
+            time.sleep(0.1)
             for privilege in ['INSERT', 'UPDATE', 'DELETE']:
                 test_privilege_sql = u"SELECT has_table_privilege(%s, '_foo', %s)"
                 have_privilege = write_connection.execute(

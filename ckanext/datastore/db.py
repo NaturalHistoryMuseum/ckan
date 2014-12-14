@@ -957,19 +957,37 @@ def search_data(context, data_dict):
     else:
         sort_clause = ''
 
-    sql_string = u'''SELECT {distinct} {select}, (SELECT count(*) FROM "{resource}" {ts_query} {where}) AS "_full_count"
-                    FROM "{resource}" {ts_query}
-                    {where} {sort} LIMIT {limit} OFFSET {offset}'''.format(
-        distinct=distinct,
-        select=select_columns,
-        resource=resource_id,
-        ts_query=ts_query,
-        where=where_clause,
-        sort=sort_clause,
-        limit=limit,
-        offset=offset)
+    if 'count' not in query_dict or query_dict.get('count'):
+        sql_string = u'''SELECT {distinct} {select}, (
+                              SELECT COUNT(*) 
+                                FROM "{resource}" {ts_query}
+                                {where}
+                            ) AS "_full_count"
+                        FROM "{resource}" {ts_query}
+                        {where} {sort} LIMIT {limit} OFFSET {offset}'''.format(
+            distinct=distinct,
+            select=select_columns,
+            resource=resource_id,
+            ts_query=ts_query,
+            where=where_clause,
+            sort=sort_clause,
+            limit=limit,
+            offset=offset)
+        where_values = where_values * 2
+    else:
+        sql_string = u'''SELECT {distinct} {select}
+                        FROM "{resource}" {ts_query}
+                        {where} {sort} LIMIT {limit} OFFSET {offset}'''.format(
+            distinct=distinct,
+            select=select_columns,
+            resource=resource_id,
+            ts_query=ts_query,
+            where=where_clause,
+            sort=sort_clause,
+            limit=limit,
+            offset=offset)
 
-    results = _execute_single_statement(context, sql_string, where_values*2)
+    results = _execute_single_statement(context, sql_string, where_values)
 
     _insert_links(data_dict, limit, offset)
     return format_results(context, results, data_dict)

@@ -131,6 +131,7 @@ def datastore_search_schema():
         'language': [ignore_missing, unicode],
         'limit': [ignore_missing, int_validator],
         'offset': [ignore_missing, int_validator],
+        'count': [ignore_missing, boolean_validator],
         'fields': [ignore_missing, list_of_strings_or_string],
         'sort': [ignore_missing, list_of_strings_or_string],
         'distinct': [ignore_missing, boolean_validator],

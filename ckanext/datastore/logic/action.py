@@ -292,6 +292,8 @@ def datastore_search(context, data_dict):
     :type fields: list or comma separated string
     :param sort: comma separated field names with ordering
                  e.g.: "fieldname1, fieldname2 desc"
+    :param count: If True, the result will include a 'total' field
+                  to the total number of matching rows. (optional, default: True)
     :type sort: string
 
     Setting the ``plain`` flag to false enables the entire PostgreSQL `full text search query language`_.

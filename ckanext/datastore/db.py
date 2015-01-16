@@ -930,7 +930,8 @@ def search_data(context, data_dict):
     query_dict = {
         'select': [],
         'sort': [],
-        'where': []
+        'where': [],
+        'count': 'count' not in data_dict or data_dict['count']
     }
 
     for plugin in p.PluginImplementations(interfaces.IDatastore):

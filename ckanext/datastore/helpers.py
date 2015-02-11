@@ -36,4 +36,4 @@ def _strip(input):
 
 
 def should_fts_index_field_type(field_type):
-    return field_type.lower() in ['tsvector', 'text', 'citext', 'number']
+    return field_type.lower() in ['tsvector', 'text', 'number']

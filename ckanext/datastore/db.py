@@ -480,7 +480,7 @@ def _build_fts_indexes(connection, data_dict, sql_index_str_method, fields):
             continue
 
         field_str = field['id']
-        if field['type'] not in ['text', 'citext', 'tsvector']:
+        if field['type'] not in ['text', 'tsvector']:
             field_str = cast_as_text(field_str)
         else:
             field_str = u'"{0}"'.format(field_str)

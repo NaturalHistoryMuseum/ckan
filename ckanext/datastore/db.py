@@ -812,8 +812,7 @@ def _where(where_clauses_and_values):
 
     for clause_and_values in where_clauses_and_values:
         where_clauses.append('(' + clause_and_values[0] + ')')
-        # Ensure all entities are unencoded
-        values += map(lambda v: urllib.unquote(v) if isinstance(v, basestring) else v, clause_and_values[1:])
+        values += map(lambda s: s.replace('%3B', ';'), clause_and_values[1:])
 
     where_clause = u' AND '.join(where_clauses)
     if where_clause:

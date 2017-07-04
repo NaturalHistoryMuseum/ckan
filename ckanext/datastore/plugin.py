@@ -208,7 +208,7 @@ class DatastorePlugin(p.SingletonPlugin):
                 pg_class AS dependee
                 LEFT OUTER JOIN pg_rewrite AS r ON r.ev_class = dependee.oid
                 LEFT OUTER JOIN pg_depend AS d ON d.objid = r.oid
-                LEFT OUTER JOIN pg_class AS dependent ON d.refobjid = dependent.oid
+                LEFT OUTER JOIN pg_class AS dependent ON d.refobjid = dependent.oid AND dependee.relkind != 'm'
             WHERE
                 (dependee.oid != dependent.oid OR dependent.oid IS NULL) AND
                 (dependee.relname IN (SELECT tablename FROM pg_catalog.pg_tables)

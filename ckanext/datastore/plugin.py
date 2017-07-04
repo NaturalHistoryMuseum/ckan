@@ -212,7 +212,8 @@ class DatastorePlugin(p.SingletonPlugin):
             WHERE
                 (dependee.oid != dependent.oid OR dependent.oid IS NULL) AND
                 (dependee.relname IN (SELECT tablename FROM pg_catalog.pg_tables)
-                    OR dependee.relname IN (SELECT viewname FROM pg_catalog.pg_views)) AND
+                    OR dependee.relname IN (SELECT viewname FROM pg_catalog.pg_views)
+                    OR dependee.relname IN (SELECT matviewname FROM pg_catalog.pg_matviews)) AND
                 dependee.relnamespace = (SELECT oid FROM pg_namespace WHERE nspname='public')
             ORDER BY dependee.oid DESC;
         '''

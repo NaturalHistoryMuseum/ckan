@@ -208,11 +208,12 @@ class DatastorePlugin(p.SingletonPlugin):
                 pg_class AS dependee
                 LEFT OUTER JOIN pg_rewrite AS r ON r.ev_class = dependee.oid
                 LEFT OUTER JOIN pg_depend AS d ON d.objid = r.oid
-                LEFT OUTER JOIN pg_class AS dependent ON d.refobjid = dependent.oid
+                LEFT OUTER JOIN pg_class AS dependent ON d.refobjid = dependent.oid AND dependee.relkind != 'm'
             WHERE
                 (dependee.oid != dependent.oid OR dependent.oid IS NULL) AND
                 (dependee.relname IN (SELECT tablename FROM pg_catalog.pg_tables)
-                    OR dependee.relname IN (SELECT viewname FROM pg_catalog.pg_views)) AND
+                    OR dependee.relname IN (SELECT viewname FROM pg_catalog.pg_views)
+                    OR dependee.relname IN (SELECT matviewname FROM pg_catalog.pg_matviews)) AND
                 dependee.relnamespace = (SELECT oid FROM pg_namespace WHERE nspname='public')
             ORDER BY dependee.oid DESC;
         '''

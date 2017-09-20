@@ -376,13 +376,13 @@ def get_action(action):
     fetched_actions = {}
     for plugin in p.PluginImplementations(p.IActions):
         for name, auth_function in plugin.get_actions().items():
-            if name in resolved_action_plugins:
-                raise Exception(
-                    'The action %r is already implemented in %r' % (
-                        name,
-                        resolved_action_plugins[name]
-                    )
-                )
+            # if name in resolved_action_plugins:
+            #     raise Exception(
+            #         'The action %r is already implemented in %r' % (
+            #             name,
+            #             resolved_action_plugins[name]
+            #         )
+            #     )
             log.debug('Action function {0} from plugin {1} was inserted'.format(name, plugin.name))
             resolved_action_plugins[name] = plugin.name
             # Extensions are exempted from the auth audit for now

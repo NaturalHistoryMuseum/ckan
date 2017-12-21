@@ -20,7 +20,11 @@ my.RecordCount = Backbone.View.extend({
 
   render: function() {
     var tmplData = this.model.toTemplateJSON();
-    tmplData.recordCount = tmplData.recordCount || 'Unknown number of';
+    if (isNaN(tmplData.recordCount)) {
+      tmplData.recordCount = 'Unknown number of';
+    } else {
+      tmplData.recordCount = tmplData.recordCount.toLocaleString();
+    }
     var templated = Mustache.render(this.template, tmplData);
     this.$el.html(templated);
   }

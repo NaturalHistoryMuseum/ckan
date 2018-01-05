@@ -1,10 +1,13 @@
+# encoding: utf-8
+
 import cgi
 
 from paste.urlparser import PkgResourcesParser
-from pylons import request, tmpl_context as c
+from pylons import request
 from pylons.controllers.util import forward
 from webhelpers.html.builder import literal
 
+from ckan.common import c
 from ckan.lib.base import BaseController
 from ckan.lib.base import render
 
@@ -29,8 +32,14 @@ class ErrorController(BaseController):
         if not original_response:
             return 'There is no error.'
         # Bypass error template for API operations.
-        if original_request and original_request.path.startswith('/api'):
+        if (original_request and
+                (original_request.path.startswith('/api') or
+                 original_request.path.startswith('/fanstatic'))):
             return original_response.body
+        # If the charset has been lost on the middleware stack, use the
+        # default one (utf-8)
+        if not original_response.charset and original_response.default_charset:
+            original_response.charset = original_response.default_charset
         # Otherwise, decorate original response with error template.
         c.content = literal(original_response.unicode_body) or \
             cgi.escape(request.GET.get('message', ''))

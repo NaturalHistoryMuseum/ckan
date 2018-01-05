@@ -46,11 +46,15 @@ Setting up the DataStore
 
 .. note::
 
-   The DataStore requires PostgreSQL 9.0 or later. It is possible to use the
-   DataStore on versions prior to 9.0 (for example 8.4). However, the
-   :meth:`~ckanext.datastore.logic.action.datastore_search_sql` will not be
-   available and the set-up is slightly different. Make sure, you read
-   :ref:`legacy-mode` for more details.
+   The DataStore (like CKAN) requires |postgres| 9.2 or later. This was
+   released in 2012, is widely available. At the time of writing, the only version
+   that is not supported by CKAN that has not been made 'end-of-life' by the
+   |postgres| community is 9.1.
+
+.. versionchanged:: 2.6
+
+   Previous CKAN (and DataStore) versions were compatible with earlier versions
+   of |postgres|.
 
 1. Enable the plugin
 ====================
@@ -116,6 +120,8 @@ if necessary, for example:
 Replace ``pass`` with the passwords you created for your |database_user| and
 |datastore_user| database users.
 
+.. _datastore-set-permissions:
+
 Set permissions
 ---------------
 
@@ -134,12 +140,12 @@ superuser using::
 
 Then you can use this connection to set the permissions::
 
-    sudo ckan datastore set-permissions |
-    sudo -u postgres psql --set ON_ERROR_STOP=1
+    sudo ckan datastore set-permissions | sudo -u postgres psql --set ON_ERROR_STOP=1
 
 .. note::
    If you performed a source install, you will need to replace all references to
-   ``sudo ckan ...`` with ``paster --plugin=ckan ...``
+   ``sudo ckan ...`` with ``paster --plugin=ckan ...`` and provide the path to
+   the config file, e.g. ``paster --plugin=ckan datastore set-permissions -c /etc/ckan/default/development.ini | sudo -u postgres psql --set ON_ERROR_STOP=1``
 
 If your database server is not local, but you can access it over SSH, you can
 pipe the permissions script over SSH::
@@ -167,16 +173,19 @@ This should return a JSON page without errors.
 To test the whether the set-up allows writing, you can create a new DataStore resource.
 To do so, run the following command::
 
- curl -X POST http://127.0.0.1:5000/api/3/action/datastore_create -H "Authorization: {YOUR-API-KEY}" -d '{"resource_id": "{RESOURCE-ID}", "fields": [ {"id": "a"}, {"id": "b"} ], "records": [ { "a": 1, "b": "xyz"}, {"a": 2, "b": "zzz"} ]}'
+ curl -X POST http://127.0.0.1:5000/api/3/action/datastore_create -H "Authorization: {YOUR-API-KEY}" -d '{"resource": {"package_id": "{PACKAGE-ID}"}, "fields": [ {"id": "a"}, {"id": "b"} ], "records": [ { "a": 1, "b": "xyz"}, {"a": 2, "b": "zzz"} ]}'
 
-Replace ``{YOUR-API-KEY}`` with a valid API key and ``{RESOURCE-ID}`` with the
-id of an existing CKAN resource.
+Replace ``{YOUR-API-KEY}`` with a valid API key and ``{PACKAGE-ID}`` with the
+id of an existing CKAN dataset.
 
 A table named after the resource id should have been created on your DataStore
 database. Visiting this URL should return a response from the DataStore with
 the records inserted above::
 
  http://127.0.0.1:5000/api/3/action/datastore_search?resource_id={RESOURCE_ID}
+
+Replace ``{RESOURCE-ID}`` with the resource id that was returned as part of the
+response of the previous API call.
 
 You can now delete the DataStore table with::
 
@@ -238,6 +247,10 @@ Data can be written incrementally to the DataStore through the API. New data can
 inserted, existing data can be updated or deleted. You can also add a new column to
 an existing table even if the DataStore resource already contains some data.
 
+Triggers may be added to enforce validation, clean data as it is loaded or
+even record record histories. Triggers are PL/pgSQL functions that must be
+created by a sysadmin.
+
 You will notice that we tried to keep the layer between the underlying PostgreSQL
 database and the API as thin as possible to allow you to use the features you would
 expect from a powerful database management system.
@@ -268,12 +281,19 @@ API reference
 
 .. _dump:
 
-Download resource as CSV
-------------------------
+Download resource
+-----------------
 
 A DataStore resource can be downloaded in the `CSV`_ file format from ``{CKAN-URL}/datastore/dump/{RESOURCE-ID}``.
 
-.. _CSV: //en.wikipedia.org/wiki/Comma-separated_values
+For an Excel-compatible CSV file use ``{CKAN-URL}/datastore/dump/{RESOURCE-ID}?bom=true``.
+
+Other formats supported include tab-separated values (``?format=tsv``),
+JSON (``?format=json``) and XML (``?format=xml``). E.g. to download an Excel-compatible
+tab-separated file use
+``{CKAN-URL}/datastore/dump/{RESOURCE-ID}?format=tsv&bom=true``.
+
+.. _CSV: https://en.wikipedia.org/wiki/Comma-separated_values
 
 
 .. _fields:
@@ -416,3 +436,13 @@ name
     Contains the name of the alias if alias_of is not null. Otherwise, this is the resource id of the CKAN resource for the DataStore resource.
 oid
     The PostgreSQL object ID of the table that belongs to name.
+
+Extending DataStore
+===================
+
+Starting from CKAN version 2.7, backend used in DataStore can be replaced with custom one. For this purpose, custom extension must implement `ckanext.datastore.interfaces.IDatastoreBackend`, which provides one method - `register_backends`. It should return dictonary with names of custom backends as keys and classes, that represent those backends as values. Each class supposed to be inherited from `ckanext.datastore.backend.DatastoreBackend`.
+
+.. note:: Example of custom implementation can be found at `ckanext.example_idatastorebackend`
+
+.. automodule:: ckanext.datastore.backend
+   :members:

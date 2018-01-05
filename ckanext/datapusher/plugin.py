@@ -1,3 +1,5 @@
+# encoding: utf-8
+
 import logging
 
 import ckan.plugins as p
@@ -18,7 +20,8 @@ _get_or_bust = logic.get_or_bust
 DEFAULT_FORMATS = [
     'csv', 'xls', 'xlsx', 'tsv', 'application/csv',
     'application/vnd.ms-excel',
-    'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+    'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+    'ods', 'application/vnd.oasis.opendocument.spreadsheet',
 ]
 
 
@@ -38,11 +41,11 @@ class ResourceDataController(base.BaseController):
             except logic.ValidationError:
                 pass
 
-            base.redirect(core_helpers.url_for(
+            core_helpers.redirect_to(
                 controller='ckanext.datapusher.plugin:ResourceDataController',
                 action='resource_data',
                 id=id,
-                resource_id=resource_id)
+                resource_id=resource_id
             )
 
         try:
@@ -52,10 +55,8 @@ class ResourceDataController(base.BaseController):
             toolkit.c.resource = p.toolkit.get_action('resource_show')(
                 None, {'id': resource_id}
             )
-        except logic.NotFound:
+        except (logic.NotFound, logic.NotAuthorized):
             base.abort(404, _('Resource not found'))
-        except logic.NotAuthorized:
-            base.abort(401, _('Unauthorized to edit this resource'))
 
         try:
             datapusher_status = p.toolkit.get_action('datapusher_status')(
@@ -64,13 +65,14 @@ class ResourceDataController(base.BaseController):
         except logic.NotFound:
             datapusher_status = {}
         except logic.NotAuthorized:
-            base.abort(401, _('Not authorized to see this page'))
+            base.abort(403, _('Not authorized to see this page'))
 
-        return base.render('package/resource_data.html',
+        return base.render('datapusher/resource_data.html',
                            extra_vars={'status': datapusher_status})
 
 
 class DatapusherPlugin(p.SingletonPlugin):
+    p.implements(p.IConfigurer, inherit=True)
     p.implements(p.IConfigurable, inherit=True)
     p.implements(p.IActions)
     p.implements(p.IAuthFunctions)
@@ -81,6 +83,10 @@ class DatapusherPlugin(p.SingletonPlugin):
 
     legacy_mode = False
     resource_show_action = None
+
+    def update_config(self, config):
+        templates_base = config.get('ckan.base_templates_folder')
+        p.toolkit.add_template_directory(config, templates_base)
 
     def configure(self, config):
         self.config = config
@@ -96,8 +102,8 @@ class DatapusherPlugin(p.SingletonPlugin):
 
     def notify(self, entity, operation=None):
         if isinstance(entity, model.Resource):
-            if (operation == model.domain_object.DomainObjectOperation.new
-                    or not operation):
+            if (operation == model.domain_object.DomainObjectOperation.new or
+                    not operation):
                 # if operation is None, resource URL has been changed, as
                 # the notify function in IResourceUrlChange only takes
                 # 1 parameter
@@ -106,7 +112,27 @@ class DatapusherPlugin(p.SingletonPlugin):
                 if (entity.format and
                         entity.format.lower() in self.datapusher_formats and
                         entity.url_type != 'datapusher'):
+
                     try:
+                        task = p.toolkit.get_action('task_status_show')(
+                            context, {
+                                'entity_id': entity.id,
+                                'task_type': 'datapusher',
+                                'key': 'datapusher'}
+                        )
+                        if task.get('state') == 'pending':
+                            # There already is a pending DataPusher submission,
+                            # skip this one ...
+                            log.debug(
+                                'Skipping DataPusher submission for '
+                                'resource {0}'.format(entity.id))
+                            return
+                    except p.toolkit.ObjectNotFound:
+                        pass
+
+                    try:
+                        log.debug('Submitting resource {0}'.format(entity.id) +
+                                  ' to DataPusher')
                         p.toolkit.get_action('datapusher_submit')(context, {
                             'resource_id': entity.id
                         })

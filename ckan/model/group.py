@@ -1,6 +1,8 @@
+# encoding: utf-8
+
 import datetime
 
-from sqlalchemy import orm, types, Column, Table, ForeignKey, or_, and_
+from sqlalchemy import orm, types, Column, Table, ForeignKey, or_, and_, text
 import vdm.sqlalchemy
 
 import meta
@@ -80,21 +82,13 @@ class Member(vdm.sqlalchemy.RevisionedObjectMixin,
     @classmethod
     def get(cls, reference):
         '''Returns a group object referenced by its id or name.'''
-        query = meta.Session.query(cls).filter(cls.id == reference)
-        member = query.first()
+        if not reference:
+            return None
+
+        member = meta.Session.query(cls).get(reference)
         if member is None:
             member = cls.by_name(reference)
         return member
-
-    def get_related(self, type):
-        """ TODO: Determine if this is useful
-            Get all objects that are members of the group of the specified
-            type.
-
-            Should the type be used to get table_name or should we use the
-            one in the constructor
-        """
-        pass
 
     def related_packages(self):
         # TODO do we want to return all related packages or certain ones?
@@ -104,11 +98,11 @@ class Member(vdm.sqlalchemy.RevisionedObjectMixin,
     def __unicode__(self):
         # refer to objects by name, not ID, to help debugging
         if self.table_name == 'package':
-            table_info = 'package=%s' % meta.Session.query(_package.Package).\
-                get(self.table_id).name
+            pkg = meta.Session.query(_package.Package).get(self.table_id)
+            table_info = 'package=%s' % pkg.name if pkg else 'None'
         elif self.table_name == 'group':
-            table_info = 'group=%s' % meta.Session.query(Group).\
-                get(self.table_id).name
+            group = meta.Session.query(Group).get(self.table_id)
+            table_info = 'group=%s' % group.name if group else 'None'
         else:
             table_info = 'table_name=%s table_id=%s' % (self.table_name,
                                                         self.table_id)
@@ -168,7 +162,7 @@ class Group(vdm.sqlalchemy.RevisionedObjectMixin,
             approved or not. It may be that we want to tie the object
             status to the approval status
         """
-        assert status in ["approved", "pending", "denied"]
+        assert status in ["approved", "denied"]
         self.approval_status = status
         if status == "denied":
             pass
@@ -197,14 +191,14 @@ class Group(vdm.sqlalchemy.RevisionedObjectMixin,
         :rtype: a list of tuples, each one a Group ID, name and title and then
         the ID of its parent group.
 
-        e.g. 
+        e.g.
         >>> dept-health.get_children_group_hierarchy()
-        [(u'8ac0...', u'national-health-service', u'National Health Service', u'e041...'), 
+        [(u'8ac0...', u'national-health-service', u'National Health Service', u'e041...'),
          (u'b468...', u'nhs-wirral-ccg', u'NHS Wirral CCG', u'8ac0...')]
         '''
         results = meta.Session.query(Group.id, Group.name, Group.title,
                                      'parent_id').\
-            from_statement(HIERARCHY_DOWNWARDS_CTE).\
+            from_statement(text(HIERARCHY_DOWNWARDS_CTE)).\
             params(id=self.id, type=type).all()
         return results
 
@@ -227,7 +221,7 @@ class Group(vdm.sqlalchemy.RevisionedObjectMixin,
         '''Returns this group's parent, parent's parent, parent's parent's
         parent etc.. Sorted with the top level parent first.'''
         return meta.Session.query(Group).\
-            from_statement(HIERARCHY_UPWARDS_CTE).\
+            from_statement(text(HIERARCHY_UPWARDS_CTE)).\
             params(id=self.id, type=type).all()
 
     @classmethod
@@ -264,10 +258,9 @@ class Group(vdm.sqlalchemy.RevisionedObjectMixin,
 
     def packages(self, with_private=False, limit=None,
             return_query=False, context=None):
-        '''Return this group's active and pending packages.
+        '''Return this group's active packages.
 
-        Returns all packages in this group with VDM revision state ACTIVE or
-        PENDING.
+        Returns all packages in this group with VDM revision state ACTIVE
 
         :param with_private: if True, include the group's private packages
         :type with_private: boolean
@@ -299,9 +292,7 @@ class Group(vdm.sqlalchemy.RevisionedObjectMixin,
             user_is_org_member = len(query.all()) != 0
 
         query = meta.Session.query(_package.Package).\
-            filter(
-                or_(_package.Package.state == core.State.ACTIVE,
-                    _package.Package.state == core.State.PENDING)). \
+            filter(_package.Package.state == core.State.ACTIVE).\
             filter(group_table.c.id == self.id).\
             filter(member_table.c.state == 'active')
 
@@ -326,7 +317,8 @@ class Group(vdm.sqlalchemy.RevisionedObjectMixin,
             return query.all()
 
     @classmethod
-    def search_by_name_or_title(cls, text_query, group_type=None, is_org=False):
+    def search_by_name_or_title(cls, text_query, group_type=None,
+                                is_org=False, limit=20):
         text_query = text_query.strip().lower()
         q = meta.Session.query(cls) \
             .filter(or_(cls.name.contains(text_query),
@@ -338,7 +330,9 @@ class Group(vdm.sqlalchemy.RevisionedObjectMixin,
             if group_type:
                 q = q.filter(cls.type == group_type)
         q = q.filter(cls.state == 'active')
-        return q.order_by(cls.title)
+        q.order_by(cls.title)
+        q = q.limit(limit)
+        return q
 
     def add_package_by_name(self, package_name):
         if not package_name:

@@ -1,20 +1,83 @@
+# encoding: utf-8
+
 import json
 import nose
 import datetime
 
-import pylons
 import sqlalchemy.orm as orm
 
 import ckan.plugins as p
 import ckan.lib.create_test_data as ctd
 import ckan.model as model
-import ckan.tests as tests
+import ckan.tests.legacy as tests
+import ckan.tests.helpers as helpers
+import ckan.tests.factories as factories
 
-import ckanext.datastore.db as db
+from ckan.common import config
+
+import ckanext.datastore.backend.postgres as db
 from ckanext.datastore.tests.helpers import rebuild_all_dbs, set_url_type
 
+assert_equal = nose.tools.assert_equal
 
-class TestDatastoreUpsert(tests.WsgiAppCase):
+
+class TestDatastoreUpsertNewTests(object):
+    @classmethod
+    def setup_class(cls):
+        if not p.plugin_loaded('datastore'):
+            p.load('datastore')
+
+    @classmethod
+    def teardown_class(cls):
+        p.unload('datastore')
+        helpers.reset_db()
+
+    def test_upsert_doesnt_crash_with_json_field(self):
+        resource = factories.Resource()
+        data = {
+            'resource_id': resource['id'],
+            'force': True,
+            'primary_key': 'id',
+            'fields': [{'id': 'id', 'type': 'text'},
+                       {'id': 'book', 'type': 'json'},
+                       {'id': 'author', 'type': 'text'}],
+        }
+        helpers.call_action('datastore_create', **data)
+        data = {
+            'resource_id': resource['id'],
+            'force': True,
+            'method': 'insert',
+            'records': [
+                {'id': '1',
+                 'book': {'code': 'A', 'title': u'ñ'},
+                 'author': 'tolstoy'}],
+        }
+        helpers.call_action('datastore_upsert', **data)
+
+    def test_upsert_doesnt_crash_with_json_field_with_string_value(self):
+        resource = factories.Resource()
+        data = {
+            'resource_id': resource['id'],
+            'force': True,
+            'primary_key': 'id',
+            'fields': [{'id': 'id', 'type': 'text'},
+                       {'id': 'book', 'type': 'json'},
+                       {'id': 'author', 'type': 'text'}],
+        }
+        helpers.call_action('datastore_create', **data)
+        data = {
+            'resource_id': resource['id'],
+            'force': True,
+            'method': 'insert',
+            'records': [
+                {'id': '1',
+                 'book': u'ñ',
+                 'author': 'tolstoy'}],
+        }
+        helpers.call_action('datastore_upsert', **data)
+
+
+class TestDatastoreUpsert():
     sysadmin_user = None
     normal_user = None
 
@@ -22,6 +85,7 @@ class TestDatastoreUpsert(tests.WsgiAppCase):
     def setup_class(cls):
         if not tests.is_datastore_supported():
             raise nose.SkipTest("Datastore not supported")
+        cls.app = helpers._get_test_app()
         p.load('datastore')
         ctd.CreateTestData.create()
         cls.sysadmin_user = model.User.get('testsysadmin')
@@ -50,8 +114,7 @@ class TestDatastoreUpsert(tests.WsgiAppCase):
         res_dict = json.loads(res.body)
         assert res_dict['success'] is True
 
-        engine = db._get_engine(
-            {'connection_url': pylons.config['ckan.datastore.write_url']})
+        engine = db.get_write_engine()
         cls.Session = orm.scoped_session(orm.sessionmaker(bind=engine))
 
     @classmethod
@@ -238,8 +301,35 @@ class TestDatastoreUpsert(tests.WsgiAppCase):
 
         assert res_dict['success'] is False
 
+    def test_upsert_works_with_empty_list_in_json_field(self):
+        hhguide = u"hitchhiker's guide to the galaxy"
 
-class TestDatastoreInsert(tests.WsgiAppCase):
+        data = {
+            'resource_id': self.data['resource_id'],
+            'method': 'upsert',
+            'records': [{
+                'nested': [],
+                u'b\xfck': hhguide}]
+        }
+
+        postparams = '%s=1' % json.dumps(data)
+        auth = {'Authorization': str(self.sysadmin_user.apikey)}
+        res = self.app.post('/api/action/datastore_upsert', params=postparams,
+                            extra_environ=auth)
+        res_dict = json.loads(res.body)
+        assert res_dict['success'] is True, res_dict
+
+        c = self.Session.connection()
+        results = c.execute('select * from "{0}"'.format(data['resource_id']))
+        record = [r for r in results.fetchall() if r[2] == hhguide]
+        self.Session.remove()
+        assert len(record) == 1, record
+        assert_equal(json.loads(record[0][4].json),
+                     data['records'][0]['nested'])
+
+
+
+class TestDatastoreInsert():
     sysadmin_user = None
     normal_user = None
 
@@ -247,6 +337,7 @@ class TestDatastoreInsert(tests.WsgiAppCase):
     def setup_class(cls):
         if not tests.is_datastore_supported():
             raise nose.SkipTest("Datastore not supported")
+        cls.app = helpers._get_test_app()
         p.load('datastore')
         ctd.CreateTestData.create()
         cls.sysadmin_user = model.User.get('testsysadmin')
@@ -275,8 +366,7 @@ class TestDatastoreInsert(tests.WsgiAppCase):
         res_dict = json.loads(res.body)
         assert res_dict['success'] is True
 
-        engine = db._get_engine(
-            {'connection_url': pylons.config['ckan.datastore.write_url']})
+        engine = db.get_write_engine()
         cls.Session = orm.scoped_session(orm.sessionmaker(bind=engine))
 
     @classmethod
@@ -341,7 +431,7 @@ class TestDatastoreInsert(tests.WsgiAppCase):
         assert results.rowcount == 3
 
 
-class TestDatastoreUpdate(tests.WsgiAppCase):
+class TestDatastoreUpdate():
     sysadmin_user = None
     normal_user = None
 
@@ -349,6 +439,7 @@ class TestDatastoreUpdate(tests.WsgiAppCase):
     def setup_class(cls):
         if not tests.is_datastore_supported():
             raise nose.SkipTest("Datastore not supported")
+        cls.app = helpers._get_test_app()
         p.load('datastore')
         ctd.CreateTestData.create()
         cls.sysadmin_user = model.User.get('testsysadmin')
@@ -382,8 +473,7 @@ class TestDatastoreUpdate(tests.WsgiAppCase):
         res_dict = json.loads(res.body)
         assert res_dict['success'] is True
 
-        engine = db._get_engine(
-            {'connection_url': pylons.config['ckan.datastore.write_url']})
+        engine = db.get_write_engine()
         cls.Session = orm.scoped_session(orm.sessionmaker(bind=engine))
 
     @classmethod

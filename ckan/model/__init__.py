@@ -1,4 +1,5 @@
-from __future__ import with_statement   # necessary for python 2.5 support
+# encoding: utf-8
+
 import warnings
 import logging
 import re
@@ -44,28 +45,6 @@ from user import (
     User,
     user_table,
 )
-from authz import (
-    NotRealUserException,
-    Enum,
-    Action,
-    Role,
-    RoleAction,
-    UserObjectRole,
-    PackageRole,
-    GroupRole,
-    SystemRole,
-    PSEUDO_USER__VISITOR,
-    PSEUDO_USER__LOGGED_IN,
-    init_authz_const_data,
-    init_authz_configuration_data,
-    add_user_to_role,
-    setup_user_roles,
-    setup_default_user_roles,
-    give_all_packages_default_user_roles,
-    user_has_role,
-    remove_user_from_role,
-    clear_user_roles,
-)
 from group import (
     Member,
     Group,
@@ -89,14 +68,10 @@ from package_extra import (
 )
 from resource import (
     Resource,
-    ResourceGroup,
     ResourceRevision,
     DictProxy,
-    resource_group_table,
     resource_table,
     resource_revision_table,
-    ResourceGroupRevision,
-    resource_group_revision_table,
 )
 from resource_view import (
     ResourceView,
@@ -109,12 +84,8 @@ from tracking import (
 )
 from rating import (
     Rating,
-)
-from related import (
-    Related,
-    RelatedDataset,
-    related_dataset_table,
-    related_table,
+    MIN_RATING,
+    MAX_RATING,
 )
 from package_relationship import (
     PackageRelationship,
@@ -146,7 +117,9 @@ from follower import (
 )
 from system_info import (
     system_info_table,
+    system_info_revision_table,
     SystemInfo,
+    SystemInfoRevision,
     get_system_info,
     set_system_info,
     delete_system_info,
@@ -217,20 +190,25 @@ class Repository(vdm.sqlalchemy.Repository):
                 try:
                     import ckan.lib.celery_app as celery_app
                     import celery.db.session as celery_session
-                    ## This creates the database tables it is a slight
-                    ## hack to celery.
+                    import celery.backends.database
+                    ## This creates the database tables (if using that backend)
+                    ## It is a slight hack to celery
                     backend = celery_app.celery.backend
-                    celery_result_session = backend.ResultSession()
-                    engine = celery_result_session.bind
-                    celery_session.ResultModelBase.metadata.create_all(engine)
+                    if isinstance(backend,
+                                  celery.backends.database.DatabaseBackend):
+                        celery_result_session = backend.ResultSession()
+                        engine = celery_result_session.bind
+                        celery_session.ResultModelBase.metadata.\
+                            create_all(engine)
                 except ImportError:
+                    # use of celery is optional
                     pass
 
-                self.init_configuration_data()
                 self.tables_created_and_initialised = True
         log.info('Database initialised')
 
     def clean_db(self):
+        self.commit_and_remove()
         meta.metadata = MetaData(self.metadata.bind)
         with warnings.catch_warnings():
             warnings.filterwarnings('ignore', '.*(reflection|tsvector).*')
@@ -240,37 +218,12 @@ class Repository(vdm.sqlalchemy.Repository):
         self.tables_created_and_initialised = False
         log.info('Database tables dropped')
 
-    def init_const_data(self):
-        '''Creates 'constant' objects that should always be there in
-        the database. If they are already there, this method does nothing.'''
-        for username in (PSEUDO_USER__LOGGED_IN,
-                         PSEUDO_USER__VISITOR):
-            if not User.by_name(username):
-                user = User(name=username)
-                meta.Session.add(user)
-        meta.Session.flush()    # so that these objects can be used
-                                # straight away
-        init_authz_const_data()
-
-    def init_configuration_data(self):
-        '''Default configuration, for when CKAN is first used out of the box.
-        This state may be subsequently configured by the user.'''
-        init_authz_configuration_data()
-        if meta.Session.query(Revision).count() == 0:
-            rev = Revision()
-            rev.author = 'system'
-            rev.message = u'Initialising the Repository'
-            Session.add(rev)
-        self.commit_and_remove()
-
     def create_db(self):
         '''Ensures tables, const data and some default config is created.
         i.e. the same as init_db APART from when running tests, when init_db
         has shortcuts.
         '''
         self.metadata.create_all(bind=self.metadata.bind)
-        self.init_const_data()
-        self.init_configuration_data()
         log.info('Database tables created')
 
     def latest_migration_version(self):
@@ -283,10 +236,6 @@ class Repository(vdm.sqlalchemy.Repository):
         if self.tables_created_and_initialised:
             # just delete data, leaving tables - this is faster
             self.delete_all()
-            # re-add default data
-            self.init_const_data()
-            self.init_configuration_data()
-            self.session.commit()
         else:
             # delete tables and data
             self.clean_db()
@@ -305,6 +254,8 @@ class Repository(vdm.sqlalchemy.Repository):
         else:
             tables = reversed(self.metadata.sorted_tables)
         for table in tables:
+            if table.name == 'migrate_version':
+                continue
             connection.execute('delete from "%s"' % table.name)
         self.session.commit()
         log.info('Database table data deleted')
@@ -336,8 +287,6 @@ class Repository(vdm.sqlalchemy.Repository):
             log.info('CKAN database version upgraded: %s -> %s', version_before, version_after)
         else:
             log.info('CKAN database version remains as: %s', version_after)
-
-        self.init_const_data()
 
         ##this prints the diffs in a readable format
         ##import pprint
@@ -394,11 +343,10 @@ class Repository(vdm.sqlalchemy.Repository):
                         for num, obj in enumerate(trevobjs):
                             if num == 0:
                                 continue
-                            if 'pending' not in obj.state:
-                                obj.current = True
-                                obj.expired_timestamp = datetime(9999, 12, 31)
-                                self.session.add(obj)
-                                break
+
+                            obj.expired_timestamp = datetime(9999, 12, 31)
+                            self.session.add(obj)
+                            break
                 # now delete revision object
                 self.session.delete(item)
             for cont in to_purge:
@@ -412,8 +360,8 @@ class Repository(vdm.sqlalchemy.Repository):
 
 repo = Repository(meta.metadata, meta.Session,
                   versioned_objects=[Package, PackageTag, Resource,
-                                     ResourceGroup, PackageExtra, Member,
-                                     Group]
+                                     PackageExtra, Member,
+                                     Group, SystemInfo]
         )
 
 

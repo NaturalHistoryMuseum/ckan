@@ -1,7 +1,14 @@
+# encoding: utf-8
+
 import os
 import re
+import logging
 
-from pylons import config
+from jinja2 import FileSystemLoader
+
+from ckan.common import config
+
+log = logging.getLogger(__name__)
 
 _template_info_cache = {}
 
@@ -12,28 +19,12 @@ def reset_template_info_cache():
 def find_template(template_name):
     ''' looks through the possible template paths to find a template
     returns the full path is it exists. '''
-    template_paths = config['pylons.app_globals'].template_paths
+    template_paths = config['computed_template_paths']
     for path in template_paths:
         if os.path.exists(os.path.join(path, template_name.encode('utf-8'))):
             return os.path.join(path, template_name)
 
 def template_type(template_path):
-    ''' returns best guess for template type
-    returns 'jinja2', 'genshi', 'genshi-text' '''
-    if template_path.endswith('.txt'):
-        return 'genshi-text'
-    try:
-        f = open(template_path, 'r')
-    except IOError:
-        # do the import here due to circular import hell functions like
-        # abort should be in a none circular importing file but that
-        # refactor has not yet happened
-        import ckan.lib.base as base
-        base.abort(404)
-    source = f.read()
-    f.close()
-    if re.search('genshi\.edgewall\.org', source):
-        return 'genshi'
     return 'jinja2'
 
 class TemplateNotFound(Exception):
@@ -58,3 +49,16 @@ def template_info(template_name):
                   'template_type' : t_type,}
         _template_info_cache[template_name] = t_data
     return template_path, t_type
+
+
+class CkanextTemplateLoader(FileSystemLoader):
+    def __init__(self):
+        super(CkanextTemplateLoader, self).__init__([])
+
+    @property
+    def searchpath(self):
+        return config['computed_template_paths']
+
+    @searchpath.setter
+    def searchpath(self, _):
+        pass

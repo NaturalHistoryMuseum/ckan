@@ -1,16 +1,18 @@
+# encoding: utf-8
+
 '''API functions for adding data to CKAN.'''
 
 import logging
 import random
 import re
+from socket import error as socket_error
+import string
 
-from pylons import config
 import paste.deploy.converters
 from sqlalchemy import func
 
 import ckan.lib.plugins as lib_plugins
 import ckan.logic as logic
-import ckan.rating as ratings
 import ckan.plugins as plugins
 import ckan.lib.dictization
 import ckan.logic.action
@@ -21,9 +23,9 @@ import ckan.lib.navl.dictization_functions
 import ckan.lib.uploader as uploader
 import ckan.lib.navl.validators as validators
 import ckan.lib.mailer as mailer
-import ckan.lib.datapreview as datapreview
+import ckan.lib.datapreview
 
-from ckan.common import _
+from ckan.common import _, config
 
 # FIXME this looks nasty and should be shared better
 from ckan.logic.action.update import _update_package_relationship
@@ -58,6 +60,8 @@ def package_create(context, data_dict):
     :param title: the title of the dataset (optional, default: same as
         ``name``)
     :type title: string
+    :param private: If ``True`` creates a private dataset
+    :type private: bool
     :param author: the name of the dataset's author (optional)
     :type author: string
     :param author_email: the email address of the dataset's author (optional)
@@ -109,14 +113,15 @@ def package_create(context, data_dict):
     :param groups: the groups to which the dataset belongs (optional), each
         group dictionary should have one or more of the following keys which
         identify an existing group:
-        ``'id'`` (the id of the group, string), ``'name'`` (the name of the
-        group, string), ``'title'`` (the title of the group, string), to see
-        which groups exist call :py:func:`~ckan.logic.action.get.group_list`
+        ``'id'`` (the id of the group, string), or ``'name'`` (the name of the
+        group, string),  to see which groups exist
+        call :py:func:`~ckan.logic.action.get.group_list`
     :type groups: list of dictionaries
     :param owner_org: the id of the dataset's owning organization, see
         :py:func:`~ckan.logic.action.get.organization_list` or
         :py:func:`~ckan.logic.action.get.organization_list_for_user` for
-        available values (optional)
+        available values. This parameter can be made optional if the config
+        option :ref:`ckan.auth.create_unowned_dataset` is set to ``True``.
     :type owner_org: string
 
     :returns: the newly created dataset (unless 'return_id_only' is set to True
@@ -128,8 +133,19 @@ def package_create(context, data_dict):
     model = context['model']
     user = context['user']
 
-    package_type = data_dict.get('type')
-    package_plugin = lib_plugins.lookup_package_plugin(package_type)
+    if 'type' not in data_dict:
+        package_plugin = lib_plugins.lookup_package_plugin()
+        try:
+            # use first type as default if user didn't provide type
+            package_type = package_plugin.package_types()[0]
+        except (AttributeError, IndexError):
+            package_type = 'dataset'
+            # in case a 'dataset' plugin was registered w/o fallback
+            package_plugin = lib_plugins.lookup_package_plugin(package_type)
+        data_dict['type'] = package_type
+    else:
+        package_plugin = lib_plugins.lookup_package_plugin(data_dict['type'])
+
     if 'schema' in context:
         schema = context['schema']
     else:
@@ -167,23 +183,24 @@ def package_create(context, data_dict):
     else:
         rev.message = _(u'REST API: Create object %s') % data.get("name")
 
-    admins = []
     if user:
         user_obj = model.User.by_name(user.decode('utf8'))
         if user_obj:
-            admins = [user_obj]
             data['creator_user_id'] = user_obj.id
 
     pkg = model_save.package_dict_save(data, context)
 
-    model.setup_default_user_roles(pkg, admins)
-    # Needed to let extensions know the package id
+    # Needed to let extensions know the package and resources ids
     model.Session.flush()
     data['id'] = pkg.id
+    if data.get('resources'):
+        for index, resource in enumerate(data['resources']):
+            resource['id'] = pkg.resources[index].id
 
     context_org_update = context.copy()
     context_org_update['ignore_auth'] = True
     context_org_update['defer_commit'] = True
+    context_org_update['add_revision'] = False
     _get_action('package_owner_org_update')(context_org_update,
                                             {'id': pkg.id,
                                              'organization_id': pkg.owner_org})
@@ -193,17 +210,25 @@ def package_create(context, data_dict):
 
         item.after_create(context, data)
 
+    # Make sure that a user provided schema is not used in create_views
+    # and on package_show
+    context.pop('schema', None)
+
+    # Create default views for resources if necessary
+    if data.get('resources'):
+        logic.get_action('package_create_default_resource_views')(
+            {'model': context['model'], 'user': context['user'],
+             'ignore_auth': True},
+            {'package': data})
+
     if not context.get('defer_commit'):
         model.repo.commit()
 
-    ## need to let rest api create
+    # need to let rest api create
     context["package"] = pkg
-    ## this is added so that the rest controller can make a new location
+    # this is added so that the rest controller can make a new location
     context["id"] = pkg.id
     log.debug('Created object %s' % pkg.name)
-
-    # Make sure that a user provided schema is not used on package_show
-    context.pop('schema', None)
 
     return_id_only = context.get('return_id_only', False)
 
@@ -217,6 +242,7 @@ def resource_create(context, data_dict):
     '''Appends a new resource to a datasets list of resources.
 
     :param package_id: id of package that the resource should be added to.
+
     :type package_id: string
     :param url: url of resource
     :type url: string
@@ -236,8 +262,6 @@ def resource_create(context, data_dict):
     :type mimetype: string
     :param mimetype_inner: (optional)
     :type mimetype_inner: string
-    :param webstore_url: (optional)
-    :type webstore_url: string
     :param cache_url: (optional)
     :type cache_url: string
     :param size: (optional)
@@ -248,8 +272,6 @@ def resource_create(context, data_dict):
     :type last_modified: iso date string
     :param cache_last_updated: (optional)
     :type cache_last_updated: iso date string
-    :param webstore_last_updated: (optional)
-    :type webstore_last_updated: iso date string
     :param upload: (optional)
     :type upload: FieldStorage (optional) needs multipart/form-data
 
@@ -261,17 +283,30 @@ def resource_create(context, data_dict):
     user = context['user']
 
     package_id = _get_or_bust(data_dict, 'package_id')
-    data_dict.pop('package_id')
-    _get_or_bust(data_dict, 'url')
+    if not data_dict.get('url'):
+        data_dict['url'] = ''
 
-    pkg_dict = _get_action('package_show')(context, {'id': package_id})
+    pkg_dict = _get_action('package_show')(
+        dict(context, return_type='dict'),
+        {'id': package_id})
 
     _check_access('resource_create', context, data_dict)
 
-    if not 'resources' in pkg_dict:
+    for plugin in plugins.PluginImplementations(plugins.IResourceController):
+        plugin.before_create(context, data_dict)
+
+    if 'resources' not in pkg_dict:
         pkg_dict['resources'] = []
 
-    upload = uploader.ResourceUpload(data_dict)
+    upload = uploader.get_resource_uploader(data_dict)
+
+    if 'mimetype' not in data_dict:
+        if hasattr(upload, 'mimetype'):
+            data_dict['mimetype'] = upload.mimetype
+
+    if 'size' not in data_dict:
+        if hasattr(upload, 'filesize'):
+            data_dict['size'] = upload.filesize
 
     pkg_dict['resources'].append(data_dict)
 
@@ -281,18 +316,34 @@ def resource_create(context, data_dict):
         _get_action('package_update')(context, pkg_dict)
         context.pop('defer_commit')
     except ValidationError, e:
-        errors = e.error_dict['resources'][-1]
-        raise ValidationError(errors)
+        try:
+            raise ValidationError(e.error_dict['resources'][-1])
+        except (KeyError, IndexError):
+            raise ValidationError(e.error_dict)
 
-    ## Get out resource_id resource from model as it will not appear in
-    ## package_show until after commit
+    # Get out resource_id resource from model as it will not appear in
+    # package_show until after commit
     upload.upload(context['package'].resources[-1].id,
                   uploader.get_max_resource_size())
+
     model.repo.commit()
 
-    ##  Run package show again to get out actual last_resource
-    pkg_dict = _get_action('package_show')(context, {'id': package_id})
-    resource = pkg_dict['resources'][-1]
+    #  Run package show again to get out actual last_resource
+    updated_pkg_dict = _get_action('package_show')(context, {'id': package_id})
+    resource = updated_pkg_dict['resources'][-1]
+
+    #  Add the default views to the new resource
+    logic.get_action('resource_create_default_resource_views')(
+        {'model': context['model'],
+         'user': context['user'],
+         'ignore_auth': True
+         },
+        {'resource': resource,
+         'package': updated_pkg_dict
+         })
+
+    for plugin in plugins.PluginImplementations(plugins.IResourceController):
+        plugin.after_create(context, resource)
 
     return resource
 
@@ -316,18 +367,20 @@ def resource_view_create(context, data_dict):
 
     '''
     model = context['model']
-    schema = (context.get('schema') or
-              ckan.logic.schema.default_create_resource_view_schema())
 
     resource_id = _get_or_bust(data_dict, 'resource_id')
     view_type = _get_or_bust(data_dict, 'view_type')
-    view_plugin = datapreview.get_view_plugin(view_type)
+    view_plugin = ckan.lib.datapreview.get_view_plugin(view_type)
+
     if not view_plugin:
         raise ValidationError(
             {"view_type": "No plugin found for view_type {view_type}".format(
                 view_type=view_type
             )}
         )
+
+    default = logic.schema.default_create_resource_view_schema(view_plugin)
+    schema = context.get('schema', default)
     plugin_schema = view_plugin.info().get('schema', {})
     schema.update(plugin_schema)
 
@@ -356,84 +409,87 @@ def resource_view_create(context, data_dict):
     return model_dictize.resource_view_dictize(resource_view, context)
 
 
-def related_create(context, data_dict):
-    '''Add a new related item to a dataset.
-
-    You must provide your API key in the Authorization header.
-
-    :param title: the title of the related item
-    :type title: string
-    :param type: the type of the related item, e.g. ``'Application'``,
-        ``'Idea'`` or ``'Visualisation'``
-    :type type: string
-    :param id: the id of the related item (optional)
-    :type id: string
-    :param description: the description of the related item (optional)
-    :type description: string
-    :param url: the URL to the related item (optional)
-    :type url: string
-    :param image_url: the URL to the image for the related item (optional)
-    :type image_url: string
-    :param dataset_id: the name or id of the dataset that the related item
-        belongs to (optional)
-    :type dataset_id: string
-
-    :returns: the newly created related item
-    :rtype: dictionary
-
+def resource_create_default_resource_views(context, data_dict):
     '''
-    model = context['model']
-    session = context['session']
-    user = context['user']
-    userobj = model.User.get(user)
+    Creates the default views (if necessary) on the provided resource
 
-    _check_access('related_create', context, data_dict)
+    The function will get the plugins for the default views defined in
+    the configuration, and if some were found the `can_view` method of
+    each one of them will be called to determine if a resource view should
+    be created. Resource views extensions get the resource dict and the
+    parent dataset dict.
 
-    data_dict["owner_id"] = userobj.id
-    data, errors = _validate(
-        data_dict, ckan.logic.schema.default_related_schema(), context)
-    if errors:
-        model.Session.rollback()
-        raise ValidationError(errors)
+    If the latter is not provided, `package_show` is called to get it.
 
-    related = model_save.related_dict_save(data, context)
-    if not context.get('defer_commit'):
-        model.repo.commit_and_remove()
+    By default only view plugins that don't require the resource data to be in
+    the DataStore are called. See
+    :py:func:`ckan.logic.action.create.package_create_default_resource_views.``
+    for details on the ``create_datastore_views`` parameter.
 
-    dataset_dict = None
-    if 'dataset_id' in data_dict:
-        dataset = model.Package.get(data_dict['dataset_id'])
-        dataset.related.append(related)
-        model.repo.commit_and_remove()
-        dataset_dict = ckan.lib.dictization.table_dictize(dataset, context)
+    :param resource: full resource dict
+    :type resource: dict
+    :param package: full dataset dict (optional, if not provided
+        :py:func:`~ckan.logic.action.get.package_show` will be called).
+    :type package: dict
+    :param create_datastore_views: whether to create views that rely on data
+        being on the DataStore (optional, defaults to False)
+    :type create_datastore_views: bool
 
-    session.flush()
+    :returns: a list of resource views created (empty if none were created)
+    :rtype: list of dictionaries
+    '''
 
-    related_dict = model_dictize.related_dictize(related, context)
-    activity_dict = {
-        'user_id': userobj.id,
-        'object_id': related.id,
-        'activity_type': 'new related item',
-    }
-    activity_dict['data'] = {
-        'related': related_dict,
-        'dataset': dataset_dict,
-    }
-    activity_create_context = {
-        'model': model,
-        'user': user,
-        'defer_commit': True,
-        'ignore_auth': True,
-        'session': session
-    }
-    logic.get_action('activity_create')(activity_create_context,
-                                        activity_dict)
-    session.commit()
+    resource_dict = _get_or_bust(data_dict, 'resource')
 
-    context["related"] = related
-    context["id"] = related.id
-    log.debug('Created object %s' % related.title)
-    return related_dict
+    _check_access('resource_create_default_resource_views', context, data_dict)
+
+    dataset_dict = data_dict.get('package')
+
+    create_datastore_views = paste.deploy.converters.asbool(
+        data_dict.get('create_datastore_views', False))
+
+    return ckan.lib.datapreview.add_views_to_resource(
+        context,
+        resource_dict,
+        dataset_dict,
+        view_types=[],
+        create_datastore_views=create_datastore_views)
+
+
+def package_create_default_resource_views(context, data_dict):
+    '''
+    Creates the default views on all resources of the provided dataset
+
+    By default only view plugins that don't require the resource data to be in
+    the DataStore are called. Passing `create_datastore_views` as True will
+    only create views that require data to be in the DataStore. The first case
+    happens when the function is called from `package_create` or
+    `package_update`, the second when it's called from the DataPusher when
+    data was uploaded to the DataStore.
+
+    :param package: full dataset dict (ie the one obtained
+        calling :py:func:`~ckan.logic.action.get.package_show`).
+    :type package: dict
+    :param create_datastore_views: whether to create views that rely on data
+        being on the DataStore (optional, defaults to False)
+    :type create_datastore_views: bool
+
+    :returns: a list of resource views created (empty if none were created)
+    :rtype: list of dictionaries
+    '''
+
+    dataset_dict = _get_or_bust(data_dict, 'package')
+
+    _check_access('package_create_default_resource_views', context, data_dict)
+
+    create_datastore_views = paste.deploy.converters.asbool(
+        data_dict.get('create_datastore_views', False))
+
+    return ckan.lib.datapreview.add_views_to_dataset_resources(
+        context,
+        dataset_dict,
+        view_types=[],
+        create_datastore_views=create_datastore_views)
 
 
 def package_relationship_create(context, data_dict):
@@ -557,7 +613,7 @@ def member_create(context, data_dict=None):
                               table_id=obj.id,
                               group_id=group.id,
                               state='active')
-
+        member.group = group
     member.capacity = capacity
 
     model.Session.add(member)
@@ -572,12 +628,12 @@ def _group_or_org_create(context, data_dict, is_org=False):
     session = context['session']
     data_dict['is_organization'] = is_org
 
-    upload = uploader.Upload('group')
+    upload = uploader.get_uploader('group')
     upload.update_data_dict(data_dict, 'image_url',
                             'image_upload', 'clear_upload')
     # get the schema
-    group_plugin = lib_plugins.lookup_group_plugin(
-        group_type=data_dict.get('type'))
+    group_type = data_dict.get('type')
+    group_plugin = lib_plugins.lookup_group_plugin(group_type)
     try:
         schema = group_plugin.form_to_db_schema_options({
             'type': 'create', 'api': 'api_version' in context,
@@ -613,11 +669,6 @@ def _group_or_org_create(context, data_dict, is_org=False):
 
     group = model_save.group_dict_save(data, context)
 
-    if user:
-        admins = [model.User.by_name(user.decode('utf8'))]
-    else:
-        admins = []
-    model.setup_default_user_roles(group, admins)
     # Needed to let extensions know the group id
     session.flush()
 
@@ -654,6 +705,7 @@ def _group_or_org_create(context, data_dict, is_org=False):
     logic.get_action('activity_create')(activity_create_context, activity_dict)
 
     upload.upload(uploader.get_max_image_size())
+
     if not context.get('defer_commit'):
         model.repo.commit()
     context["group"] = group
@@ -676,7 +728,14 @@ def _group_or_org_create(context, data_dict, is_org=False):
     logic.get_action('member_create')(member_create_context, member_dict)
 
     log.debug('Created object %s' % group.name)
-    return model_dictize.group_dictize(group, context)
+
+    return_id_only = context.get('return_id_only', False)
+    action = 'organization_show' if is_org else 'group_show'
+
+    output = context['id'] if return_id_only \
+        else _get_action(action)(context, {'id': group.id})
+
+    return output
 
 
 def group_create(context, data_dict):
@@ -736,7 +795,9 @@ def group_create(context, data_dict):
         a member of the group)
     :type users: list of dictionaries
 
-    :returns: the newly created group
+    :returns: the newly created group (unless 'return_id_only' is set to True
+              in the context, in which case just the group id will
+              be returned)
     :rtype: dictionary
 
     '''
@@ -795,12 +856,14 @@ def organization_create(context, data_dict):
         in which the user is a member of the organization)
     :type users: list of dictionaries
 
-    :returns: the newly created organization
+    :returns: the newly created organization (unless 'return_id_only' is set
+              to True in the context, in which case just the organization id
+              will be returned)
     :rtype: dictionary
 
     '''
     # wrapper for creating organizations
-    data_dict['type'] = 'organization'
+    data_dict.setdefault('type', 'organization')
     _check_access('organization_create', context, data_dict)
     return _group_or_org_create(context, data_dict, is_org=True)
 
@@ -841,16 +904,17 @@ def rating_create(context, data_dict):
             opts_err = _('Rating must be an integer value.')
         else:
             package = model.Package.get(package_ref)
-            if rating < ratings.MIN_RATING or rating > ratings.MAX_RATING:
+            if rating < model.MIN_RATING or rating > model.MAX_RATING:
                 opts_err = _('Rating must be between %i and %i.') \
-                    % (ratings.MIN_RATING, ratings.MAX_RATING)
+                    % (model.MIN_RATING, model.MAX_RATING)
             elif not package:
                 opts_err = _('Not found') + ': %r' % package_ref
     if opts_err:
         raise ValidationError(opts_err)
 
     user = model.User.by_name(user)
-    ratings.set_rating(user, package, rating_int)
+    package.set_rating(user, rating_int)
+    model.repo.commit()
 
     package = model.Package.get(package_ref)
     ret_dict = {'rating average': package.get_average_rating(),
@@ -878,10 +942,8 @@ def user_create(context, data_dict):
     :type fullname: string
     :param about: a description of the new user (optional)
     :type about: string
-    :param openid: (optional)
-    :type openid: string
 
-    :returns: the newly created yser
+    :returns: the newly created user
     :rtype: dictionary
 
     '''
@@ -896,6 +958,10 @@ def user_create(context, data_dict):
     if errors:
         session.rollback()
         raise ValidationError(errors)
+
+    # user schema prevents non-sysadmins from providing password_hash
+    if 'password_hash' in data:
+        data['_password'] = data.pop('password_hash')
 
     user = model_save.user_dict_save(data, context)
 
@@ -952,9 +1018,10 @@ def user_invite(context, data_dict):
         or ``admin``
     :type role: string
 
-    :returns: the newly created yser
+    :returns: the newly created user
     :rtype: dictionary
     '''
+    import string
     _check_access('user_invite', context, data_dict)
 
     schema = context.get('schema',
@@ -963,8 +1030,25 @@ def user_invite(context, data_dict):
     if errors:
         raise ValidationError(errors)
 
+    model = context['model']
+    group = model.Group.get(data['group_id'])
+    if not group:
+        raise NotFound()
+
     name = _get_random_username_from_email(data['email'])
-    password = str(random.SystemRandom().random())
+    # Choose a password. However it will not be used - the invitee will not be
+    # told it - they will need to reset it
+    while True:
+        password = ''.join(random.SystemRandom().choice(
+            string.ascii_lowercase + string.ascii_uppercase + string.digits)
+            for _ in range(12))
+        # Occasionally it won't meet the constraints, so check
+        errors = {}
+        logic.validators.user_password_validator(
+            'password', {'password': password}, errors, None)
+        if not errors:
+            break
+
     data['name'] = name
     data['password'] = password
     data['state'] = ckan.model.State.PENDING
@@ -975,14 +1059,32 @@ def user_invite(context, data_dict):
         'id': data['group_id'],
         'role': data['role']
     }
-    _get_action('group_member_create')(context, member_dict)
-    mailer.send_invite(user)
+
+    if group.is_organization:
+        _get_action('organization_member_create')(context, member_dict)
+        group_dict = _get_action('organization_show')(context,
+                                                      {'id': data['group_id']})
+    else:
+        _get_action('group_member_create')(context, member_dict)
+        group_dict = _get_action('group_show')(context,
+                                               {'id': data['group_id']})
+    try:
+        mailer.send_invite(user, group_dict, data['role'])
+    except (socket_error, mailer.MailerException) as error:
+        # Email could not be sent, delete the pending user
+
+        _get_action('user_delete')(context, {'id': user.id})
+
+        msg = _('Error sending the invite email, ' +
+                'the user was not created: {0}').format(error)
+        raise ValidationError({'message': msg}, error_summary=msg)
+
     return model_dictize.user_dictize(user, context)
 
 
 def _get_random_username_from_email(email):
     localpart = email.split('@')[0]
-    cleaned_localpart = re.sub(r'[^\w]', '-', localpart)
+    cleaned_localpart = re.sub(r'[^\w]', '-', localpart).lower()
 
     # if we can't create a unique user name within this many attempts
     # then something else is probably wrong and we should give up
@@ -997,7 +1099,7 @@ def _get_random_username_from_email(email):
     return cleaned_localpart
 
 
-## Modifications for rest api
+# Modifications for rest api
 
 def package_create_rest(context, data_dict):
     _check_access('package_create_rest', context, data_dict)
@@ -1145,8 +1247,8 @@ def tag_create(context, data_dict):
         characters long containing only alphanumeric characters and ``-``,
         ``_`` and ``.``, e.g. ``'Jazz'``
     :type name: string
-    :param vocabulary_id: the name or id of the vocabulary that the new tag
-        should be added to, e.g. ``'Genre'``
+    :param vocabulary_id: the id of the vocabulary that the new tag
+        should be added to, e.g. the id of vocabulary ``'Genre'``
     :type vocabulary_id: string
 
     :returns: the newly-created tag
@@ -1243,7 +1345,7 @@ def follow_dataset(context, data_dict):
 
     '''
 
-    if not 'user' in context:
+    if 'user' not in context:
         raise logic.NotAuthorized(
             _("You must be logged in to follow a dataset."))
 
@@ -1296,11 +1398,17 @@ def _group_or_org_member_create(context, data_dict, is_org=False):
 
     schema = ckan.logic.schema.member_schema()
     data, errors = _validate(data_dict, schema, context)
+    if errors:
+        model.Session.rollback()
+        raise ValidationError(errors)
 
     username = _get_or_bust(data_dict, 'username')
     role = data_dict.get('role')
     group_id = data_dict.get('id')
     group = model.Group.get(group_id)
+    if not group:
+        msg = _('Organization not found') if is_org else _('Group not found')
+        raise NotFound(msg)
     result = model.User.get(username)
     if result:
         user_id = result.id
@@ -1320,7 +1428,8 @@ def _group_or_org_member_create(context, data_dict, is_org=False):
         'session': session,
         'ignore_auth': context.get('ignore_auth'),
     }
-    logic.get_action('member_create')(member_create_context, member_dict)
+    return logic.get_action('member_create')(member_create_context,
+                                             member_dict)
 
 
 def group_member_create(context, data_dict):

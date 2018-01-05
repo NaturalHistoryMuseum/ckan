@@ -23,12 +23,12 @@ module to use, including:
   document traversal and manipulation, event handling, and animation. See
   `jQuery's own docs <http://jquery.com/>`_ for details.
 
+.. _this_sandbox:
+
 * :js:data:`this.sandbox`, an object containing useful functions for all
   modules to use, including:
 
   * :js:data:`this.sandbox.client`, an API client for calling the API
-
-  * :ref:`Internationalization functions <javascript i18n>`
 
   * :js:data:`this.sandbox.jQuery`, a jQuery find function that is not bound to
     the module's HTML element. ``this.sandbox.jQuery('a')`` will return all the
@@ -53,11 +53,8 @@ module to use, including:
   circumstances where a module may need to use ``window`` (for example if a
   vendor plugin that the module uses needs it).
 
-* ``this.i18n``, a helper function for getting localized strings from
-  ``this.options``. English strings marked for translation can be added to the
-  module's ``this.options`` object, and ``this.i18n()`` can be called to
-  retrieve the localized version of a string according to the current user's
-  language. See :ref:`javascript i18n`.
+* ``this._`` and ``this.ngettext`` for string internationalization. See
+  :ref:`javascript i18n`.
 
 * ``this.remove()``, a method that tears down the module and removes it from
   the page (this usually called by CKAN, not by the module itself).

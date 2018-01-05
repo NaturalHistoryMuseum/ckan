@@ -18,8 +18,6 @@ import sys
 import os
 import subprocess
 
-import ckan.lib.util as util
-
 # If your extensions (or modules documented by autodoc) are in another directory,
 # add these directories to sys.path here. If the directory is relative to the
 # documentation root, use os.path.abspath to make it absolute, like shown here.
@@ -45,7 +43,7 @@ rst_epilog = '''
 .. |datastore_user| replace:: datastore_default
 .. |test_database| replace:: ckan_test
 .. |test_datastore| replace:: datastore_test
-.. |apache_config_file| replace:: /etc/apache2/sites-available/ckan_default
+.. |apache_config_file| replace:: /etc/apache2/sites-available/ckan_default.conf
 .. |apache.wsgi| replace:: |config_dir|/apache.wsgi
 .. |data_dir| replace:: |config_dir|/data
 .. |sstore| replace:: |config_dir|/sstore
@@ -54,7 +52,7 @@ rst_epilog = '''
 .. |storage_path| replace:: |storage_parent_dir|/default
 .. |reload_apache| replace:: sudo service apache2 reload
 .. |restart_apache| replace:: sudo service apache2 restart
-.. |restart_solr| replace:: sudo service jetty restart
+.. |restart_solr| replace:: sudo service jetty8 restart
 .. |solr| replace:: Solr
 .. |restructuredtext| replace:: reStructuredText
 .. |nginx| replace:: Nginx
@@ -63,9 +61,10 @@ rst_epilog = '''
 .. |sqlalchemy| replace:: SQLAlchemy
 .. |javascript| replace:: JavaScript
 .. |apache| replace:: Apache
-.. |nginx_config_file| replace:: /etc/nginx/sites-available/ckan_default
+.. |nginx_config_file| replace:: /etc/nginx/sites-available/ckan
 .. |reload_nginx| replace:: sudo service nginx reload
 .. |jquery| replace:: jQuery
+.. |nodejs| replace:: Node.js
 
 .. _Jinja2: http://jinja.pocoo.org/
 .. _CKAN front page: http://127.0.0.1:5000
@@ -96,7 +95,7 @@ master_doc = 'contents'
 # General information about the project.
 project = u'CKAN'
 project_short_name = u'CKAN'
-copyright = u'''&copy; 2009-2013, <a href="http://okfn.org/">Open Knowledge Foundation</a>.
+copyright = u'''&copy; 2009-2017 <a href="https://okfn.org/">Open Knowledge International</a> and <a href="https://github.com/ckan/ckan/graphs/contributors">contributors</a>.
     Licensed under <a
     href="http://creativecommons.org/licenses/by-sa/3.0/">Creative Commons
     Attribution ShareAlike (Unported) v3.0 License</a>.<br />
@@ -125,7 +124,7 @@ def latest_release_tag():
     This requires git to be installed.
 
     '''
-    git_tags = util.check_output(
+    git_tags = subprocess.check_output(
         ['git', 'tag', '-l'], stderr=subprocess.STDOUT).split()
 
     # FIXME: We could do more careful pattern matching against ckan-X.Y.Z here.
@@ -154,10 +153,10 @@ def latest_release_version():
     return version
 
 
-def latest_package_name():
+def latest_package_name(distro='trusty'):
     '''Return the filename of the Ubuntu package for the latest stable release.
 
-    e.g. "python-ckan_2.1_amd64.deb"
+    e.g. "python-ckan_2.1-trusty_amd64.deb"
 
     '''
     # We don't create a new package file name for a patch release like 2.1.1,
@@ -165,17 +164,28 @@ def latest_package_name():
     # have the X.Y part of the version number in them, not X.Y.Z.
     latest_minor_version = latest_release_version()[:3]
 
-    return 'python-ckan_{version}_amd64.deb'.format(
-        version=latest_minor_version)
+    return 'python-ckan_{version}-{distro}_amd64.deb'.format(
+        version=latest_minor_version, distro=distro)
 
 
-def write_latest_release_file():
-    '''Write a file in the doc/ dir containing reStructuredText substitutions
-    for the latest release tag name and version number.
-
+def min_setuptools_version():
     '''
-    filename = '_latest_release.rst'
-    template = ''':orphan:
+    Get the minimum setuptools version as defined in requirement-setuptools.txt.
+    '''
+    filename = os.path.join(os.path.dirname(__file__), '..',
+                            'requirement-setuptools.txt')
+    with open(filename) as f:
+        return f.read().split('==')[1].strip()
+
+
+def write_substitutions_file(**kwargs):
+    '''
+    Write a file in the doc/ dir containing reStructuredText substitutions.
+
+    Any keyword argument is stored as a substitution.
+    '''
+    filename = '_substitutions.rst'
+    header = ''':orphan:
 
 .. Some common reStructuredText substitutions.
 
@@ -190,20 +200,21 @@ def write_latest_release_file():
 
      |latest_release_version|
 
-.. |latest_release_tag| replace:: {latest_tag}
-.. |latest_release_version| replace:: {latest_version}
-.. |latest_package_name| replace:: {package_name}
-
 '''
-    open(filename, 'w').write(template.format(
-        filename=filename,
-        latest_tag=latest_release_tag(),
-        latest_version=latest_release_version(),
-        package_name=latest_package_name(),
-        ))
+    with open(filename, 'w') as f:
+        f.write(header.format(filename=filename))
+        for name, substitution in kwargs.items():
+            f.write('.. |{name}| replace:: {substitution}\n'.format(
+                    name=name, substitution=substitution))
 
 
-write_latest_release_file()
+write_substitutions_file(
+    latest_release_tag=latest_release_tag(),
+    latest_release_version=latest_release_version(),
+    latest_package_name_precise=latest_package_name('precise'),
+    latest_package_name_trusty=latest_package_name('trusty'),
+    min_setuptools_version=min_setuptools_version(),
+)
 
 
 # The language for content autogenerated by Sphinx. Refer to documentation
@@ -328,7 +339,7 @@ htmlhelp_basename = 'CKANdoc'
 # (source start file, target name, title, author, document class [howto/manual]).
 latex_documents = [
   ('contents', 'CKAN.tex', ur'CKAN documentation',
-   ur'Open Knowledge Foundation', 'manual'),
+   ur'CKAN contributors', 'manual'),
 ]
 
 # The name of an image file (relative to this directory) to place at the top of

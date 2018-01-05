@@ -1,12 +1,6 @@
-this.ckan.module('recline_view', function (jQuery, _) {
+this.ckan.module('recline_view', function (jQuery) {
   return {
     options: {
-      i18n: {
-        errorLoadingPreview: "Could not load view",
-        errorDataProxy: "DataProxy returned an error",
-        errorDataStore: "DataStore returned an error",
-        previewNotAvailableForDataType: "View not available for data type: "
-      },
       site_url: "",
       controlsClassName: "controls"
     },
@@ -17,7 +11,7 @@ this.ckan.module('recline_view', function (jQuery, _) {
       this.options.resourceView = JSON.parse(this.options.resourceView);
       this.el.ready(this._onReady);
       // hack to make leaflet use a particular location to look for images
-      L.Icon.Default.imagePath = this.options.site_url + 'vendor/leaflet/0.4.4/images';
+      L.Icon.Default.imagePath = this.options.site_url + 'vendor/leaflet/0.7.7/images';
     },
 
     _onReady: function() {
@@ -31,11 +25,10 @@ this.ckan.module('recline_view', function (jQuery, _) {
       var self = this;
 
       function showError(msg){
-        msg = msg || _('error loading view');
+        msg = msg || self._('error loading view');
         window.parent.ckan.pubsub.publish('data-viewer-error', msg);
       }
 
-      resourceData.url  = this.normalizeUrl(resourceData.url);
       if (resourceData.formatNormalized === '') {
         var tmp = resourceData.url.split('/');
         tmp = tmp[tmp.length - 1];
@@ -47,25 +40,44 @@ this.ckan.module('recline_view', function (jQuery, _) {
         }
       }
 
-      var errorMsg, dataset;
+      var errorMsg, dataset, map_config;
 
-      resourceData.backend =  'ckan';
-      resourceData.endpoint = jQuery('body').data('site-root') + 'api';
+      if (!resourceData.datastore_active) {
+          recline.Backend.DataProxy.timeout = 10000;
+          resourceData.backend =  'dataproxy';
+      } else {
+          resourceData.backend =  'ckan';
+          resourceData.endpoint = jQuery('body').data('site-root') + 'api';
+      }
 
       dataset = new recline.Model.Dataset(resourceData);
+
+      map_config = this.options.map_config;
 
       var query = new recline.Model.Query();
       query.set({ size: reclineView.limit || 100 });
       query.set({ from: reclineView.offset || 0 });
-      if (window.parent.ckan.views && window.parent.ckan.views.viewhelpers) {
-        $.each(window.parent.ckan.views.viewhelpers.filters.get(), function (field,values) {
-          query.addFilter({type: 'term', field: field, term: values});
-        });
+
+      var urlFilters = {};
+      try {
+        if (window.parent.ckan.views && window.parent.ckan.views.filters) {
+          urlFilters = window.parent.ckan.views.filters.get();
+        }
+      } catch(e) {}
+      var defaultFilters = reclineView.filters || {},
+          filters = jQuery.extend({}, defaultFilters, urlFilters);
+      jQuery.each(filters, function (field,values) {
+        query.addFilter({type: 'term', field: field, term: values});
+      });
+
+      dataset.queryState.set(query.toJSON(), {silent: true});
+
+      errorMsg = this._('Could not load view') + ': ';
+      if (resourceData.backend == 'ckan') {
+        errorMsg += this._('DataStore returned an error');
+      } else if (resourceData.backend == 'dataproxy'){
+        errorMsg += this._('DataProxy returned an error');
       }
-
-      dataset.query(query);
-
-      errorMsg = this.options.i18n.errorLoadingPreview + ': ' + this.options.i18n.errorDataStore;
       dataset.fetch()
         .done(function(dataset){
             self.initializeView(dataset, reclineView);
@@ -104,9 +116,9 @@ this.ckan.module('recline_view', function (jQuery, _) {
           state.lonField = reclineView.longitude_field;
         }
 
-        view = new recline.View.Map({model: dataset, state: state});
+        view = new recline.View.Map(this._reclineMapViewOptions(dataset, this.options.map_config));
       } else if(reclineView.view_type === "recline_view") {
-        view = this._newDataExplorer(dataset);
+        view = this._newDataExplorer(dataset, this.options.map_config);
       } else {
         // default to Grid
         view = new recline.View.SlickGrid({model: dataset});
@@ -120,10 +132,10 @@ this.ckan.module('recline_view', function (jQuery, _) {
       // recline_view automatically adds itself to the DOM, so we don't
       // need to bother with it.
       if(reclineView.view_type !== 'recline_view') {
-        var newElements = $('<div />');
+        var newElements = jQuery('<div />');
         this._renderControls(newElements, controls, this.options.controlsClassName);
         newElements.append(view.el);
-        $(this.el).html(newElements);
+        jQuery(this.el).html(newElements);
         view.visible = true;
         view.render();
       }
@@ -133,35 +145,74 @@ this.ckan.module('recline_view', function (jQuery, _) {
       }
     },
 
-    _newDataExplorer: function (dataset) {
+    _reclineMapViewOptions: function(dataset, map_config) {
+      var tile_url, attribution, subdomains;
+      tile_url = attribution = subdomains = '';
+
+      if (map_config.type == 'mapbox') {
+          // MapBox base map
+          if (!map_config['mapbox.map_id'] || !map_config['mapbox.access_token']) {
+            throw '[CKAN Map Widgets] You need to provide a map ID ' +
+                  '([account].[handle]) and an access token when using a ' +
+                  'MapBox layer. See ' +
+                  'http://www.mapbox.com/developers/api-overview/ for details';
+          }
+          tile_url = '//{s}.tiles.mapbox.com/v4/' +
+                     map_config['mapbox.map_id'] +
+                     '/{z}/{x}/{y}.png?access_token=' +
+                     map_config['mapbox.access_token'];
+          handle = map_config['mapbox.map_id'];
+          subdomains = map_config.subdomains || 'abcd';
+          attribution = map_config.attribution ||
+                        'Data: <a href="http://osm.org/copyright" ' +
+                        'target="_blank">OpenStreetMap</a>, Design: <a ' +
+                        'href="http://mapbox.com/about/maps" ' +
+                        'target="_blank">MapBox</a>';
+      } else if (map_config.type == 'custom') {
+          // Custom XYZ layer
+          tile_url = map_config['custom.url'] || '';
+          attribution = map_config.attribution || '';
+          subdomains = map_config.subdomains || '';
+
+          if (map_config['custom.tms'])
+            var tms = map_config['custom.tms'];
+      }
+
+      return {
+        model: dataset,
+        mapTilesURL: tile_url,
+        mapTilesAttribution: attribution,
+        mapTilesSubdomains: subdomains
+      };
+    },
+
+    _newDataExplorer: function (dataset, map_config) {
       var views = [
         {
           id: 'grid',
-          label: 'Grid',
+          label: this._('Grid'),
           view: new recline.View.SlickGrid({
             model: dataset
           })
         },
         {
           id: 'graph',
-          label: 'Graph',
+          label: this._('Graph'),
           view: new recline.View.Graph({
             model: dataset
           })
         },
         {
           id: 'map',
-          label: 'Map',
-          view: new recline.View.Map({
-            model: dataset
-          })
+          label: this._('Map'),
+          view: new recline.View.Map(this._reclineMapViewOptions(dataset, map_config))
         }
       ];
 
       var sidebarViews = [
         {
           id: 'valueFilter',
-          label: 'Filters',
+          label: this._('Filters'),
           view: new recline.View.ValueFilter({
             model: dataset
           })
@@ -181,20 +232,12 @@ this.ckan.module('recline_view', function (jQuery, _) {
       return dataExplorer;
     },
 
-    normalizeUrl: function (url) {
-      if (url.indexOf('https') === 0) {
-        return 'http' + url.slice(5);
-      } else {
-        return url;
-      }
-    },
-
     _renderControls: function (el, controls, className) {
-      var controlsEl = $("<div class=\"clearfix " + className + "\" />");
+      var controlsEl = jQuery("<div class=\"clearfix " + className + "\" />");
       for (var i = 0; i < controls.length; i++) {
         controlsEl.append(controls[i].el);
       }
-      $(el).append(controlsEl);
+      jQuery(el).append(controlsEl);
     }
   };
 });

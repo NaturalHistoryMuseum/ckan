@@ -48,6 +48,12 @@ A dataset contains two things:
   example, different resources might contain the data for different years, or
   they might contain the same data in different formats.
 
+
+.. note:: On early CKAN versions, datasets were called "packages" and this name
+    has stuck in some places, specially internally and on API calls. Package has
+    exactly the same meaning as "dataset".
+
+
 Users, organizations and authorization
 ======================================
 
@@ -63,7 +69,7 @@ government departments, each of which publishes data. Each organization can
 have its own workflow and authorizations, allowing it to manage its own
 publishing process.
 
-An organization's administrators can add add individual users to it, with
+An organization's administrators can add individual users to it, with
 different roles depending on the level of authorization needed. A user in an
 organization can create a dataset owned by that organization. In the default
 setup, this dataset is initially private, and visible only to other users in
@@ -459,8 +465,7 @@ The dataset page also has two other tabs:
 
 * *Activity stream* -- see the history of recent changes to the dataset
 
-* *Related items* -- see any links to web pages related to this dataset, or add
-  your own links.
+* *Groups* -- see any group associated with this dataset.
 
 If the dataset is of interest, you can opt to be notified of changes to it by
 using the "Follow" button on the dataset page. See the section

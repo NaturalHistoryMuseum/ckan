@@ -1,3 +1,5 @@
+# encoding: utf-8
+
 import datetime
 
 from sqlalchemy import orm, types, Column, Table, ForeignKey
@@ -8,7 +10,11 @@ import user
 import domain_object
 import types as _types
 
-__all__ = ['Rating']
+__all__ = ['Rating', 'MIN_RATING', 'MAX_RATING']
+
+MIN_RATING = 1.0
+MAX_RATING = 5.0
+
 
 rating_table = Table('rating', meta.metadata,
                      Column('id', types.UnicodeText, primary_key=True, default=_types.make_uuid),

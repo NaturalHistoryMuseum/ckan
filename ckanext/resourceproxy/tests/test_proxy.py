@@ -1,16 +1,16 @@
+# encoding: utf-8
+
 import requests
 import unittest
 import json
 import httpretty
 
-import paste.fixture
-from pylons import config
+from ckan.tests.helpers import _get_test_app
+from ckan.common import config
 
 import ckan.model as model
-import ckan.tests as tests
 import ckan.plugins as p
 import ckan.lib.create_test_data as create_test_data
-import ckan.config.middleware as middleware
 import ckanext.resourceproxy.controller as controller
 import ckanext.resourceproxy.plugin as proxy
 
@@ -27,7 +27,8 @@ def set_resource_url(url):
     context = {
         'model': model,
         'session': model.Session,
-        'user': model.User.get('testsysadmin').name
+        'user': model.User.get('testsysadmin').name,
+        'use_cache': False,
     }
 
     resource = p.toolkit.get_action('resource_show')(
@@ -44,16 +45,17 @@ def set_resource_url(url):
     return {'resource': resource, 'package': package}
 
 
-class TestProxyPrettyfied(tests.WsgiAppCase, unittest.TestCase):
+class TestProxyPrettyfied(unittest.TestCase):
 
     serving = False
 
     @classmethod
     def setup_class(cls):
         cls._original_config = config.copy()
+        cls.app = _get_test_app()
+        if not p.plugin_loaded('resource_proxy'):
+            p.load('resource_proxy')
         config['ckan.plugins'] = 'resource_proxy'
-        wsgiapp = middleware.make_app(config['global_conf'], **config)
-        cls.app = paste.fixture.TestApp(wsgiapp)
         create_test_data.CreateTestData.create()
 
     @classmethod
@@ -100,7 +102,7 @@ class TestProxyPrettyfied(tests.WsgiAppCase, unittest.TestCase):
         result = self.app.get(proxied_url, status='*')
         # we expect a 409 because the resourceproxy got an error (404)
         # from the server
-        assert result.status == 409, result.status
+        assert result.status_int == 409, result.status
         assert '404' in result.body
 
     @httpretty.activate
@@ -113,7 +115,7 @@ class TestProxyPrettyfied(tests.WsgiAppCase, unittest.TestCase):
 
         proxied_url = proxy.get_proxified_resource_url(self.data_dict)
         result = self.app.get(proxied_url, status='*')
-        assert result.status == 409, result.status
+        assert result.status_int == 409, result.status
         assert 'too large' in result.body, result.body
 
     @httpretty.activate
@@ -126,7 +128,7 @@ class TestProxyPrettyfied(tests.WsgiAppCase, unittest.TestCase):
 
         proxied_url = proxy.get_proxified_resource_url(self.data_dict)
         result = self.app.get(proxied_url, status='*')
-        assert result.status == 409, result.status
+        assert result.status_int == 409, result.status
         assert 'too large' in result.body, result.body
 
     @httpretty.activate
@@ -135,20 +137,21 @@ class TestProxyPrettyfied(tests.WsgiAppCase, unittest.TestCase):
 
         proxied_url = proxy.get_proxified_resource_url(self.data_dict)
         result = self.app.get(proxied_url, status='*')
-        assert result.status == 409, result.status
+        assert result.status_int == 409, result.status
         assert 'Invalid URL' in result.body, result.body
 
     def test_non_existent_url(self):
-        self.data_dict = set_resource_url('http://foo.bar')
+        self.data_dict = set_resource_url('http://nonexistent.example.com')
 
         def f1():
             url = self.data_dict['resource']['url']
             requests.get(url)
+
         self.assertRaises(requests.ConnectionError, f1)
 
         proxied_url = proxy.get_proxified_resource_url(self.data_dict)
         result = self.app.get(proxied_url, status='*')
-        assert result.status == 502, result.status
+        assert result.status_int == 502, result.status
         assert 'connection error' in result.body, result.body
 
     def test_proxied_resource_url_proxies_http_and_https_by_default(self):

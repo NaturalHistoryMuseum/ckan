@@ -1,3 +1,5 @@
+# encoding: utf-8
+
 import json
 
 import ckan.plugins as p
@@ -14,6 +16,8 @@ empty = get_validator('empty')
 boolean_validator = get_validator('boolean_validator')
 int_validator = get_validator('int_validator')
 OneOf = get_validator('OneOf')
+unicode_only = get_validator('unicode_only')
+default = get_validator('default')
 
 
 def rename(old, new):
@@ -56,7 +60,13 @@ def list_of_strings_or_string(key, data, errors, context):
 
 
 def json_validator(value, context):
-    if isinstance(value, dict) or isinstance(value, list):
+    '''Validate and parse a JSON value.
+
+    dicts and lists will be returned untouched, while other values
+    will be run through a JSON parser before being returned. If the
+    parsing fails, raise an Invalid exception.
+    '''
+    if isinstance(value, (list, dict)):
         return value
     try:
         value = json.loads(value)
@@ -66,10 +76,21 @@ def json_validator(value, context):
 
 
 def unicode_or_json_validator(value, context):
+    '''Return a parsed JSON object when applicable, a unicode string when not.
+
+    dicts and None will be returned untouched; otherwise return a JSON object
+    if the value can be parsed as such. Return unicode(value) in all other
+    cases.
+    '''
     try:
         if value is None:
             return value
-        return json_validator(value, context)
+        v = json_validator(value, context)
+        # json.loads will parse literals; however we want literals as unicode.
+        if not isinstance(v, dict):
+            return unicode(value)
+        else:
+            return v
     except df.Invalid:
         return unicode(value)
 
@@ -82,10 +103,22 @@ def datastore_create_schema():
         'aliases': [ignore_missing, list_of_strings_or_string],
         'fields': {
             'id': [not_empty, unicode],
-            'type': [ignore_missing]
+            'type': [ignore_missing],
+            'info': [ignore_missing],
         },
         'primary_key': [ignore_missing, list_of_strings_or_string],
         'indexes': [ignore_missing, list_of_strings_or_string],
+        'triggers': {
+            'when': [
+                default(u'before insert or update'),
+                unicode_only,
+                OneOf([u'before insert or update'])],
+            'for_each': [
+                default(u'row'),
+                unicode_only,
+                OneOf([u'row'])],
+            'function': [not_empty, unicode_only],
+        },
         '__junk': [empty],
         '__before': [rename('id', 'resource_id')]
     }
@@ -129,7 +162,32 @@ def datastore_search_schema():
         'fields': [ignore_missing, list_of_strings_or_string],
         'sort': [ignore_missing, list_of_strings_or_string],
         'distinct': [ignore_missing, boolean_validator],
+        'include_total': [default(True), boolean_validator],
+        'records_format': [
+            default(u'objects'),
+            OneOf([u'objects', u'lists', u'csv', u'tsv'])],
         '__junk': [empty],
         '__before': [rename('id', 'resource_id')]
     }
     return schema
+
+
+def datastore_function_create_schema():
+    return {
+        'name': [unicode_only, not_empty],
+        'or_replace': [default(False), boolean_validator],
+        # we're only exposing functions for triggers at the moment
+        'arguments': {
+            'argname': [unicode_only, not_empty],
+            'argtype': [unicode_only, not_empty],
+        },
+        'rettype': [default(u'void'), unicode_only],
+        'definition': [unicode_only],
+    }
+
+
+def datastore_function_delete_schema():
+    return {
+        'name': [unicode_only, not_empty],
+        'if_exists': [default(False), boolean_validator],
+    }

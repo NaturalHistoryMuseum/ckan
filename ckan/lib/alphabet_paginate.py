@@ -1,3 +1,5 @@
+# encoding: utf-8
+
 '''
 Based on webhelpers.paginator, but:
  * each page is for items beginning with a particular letter
@@ -19,7 +21,7 @@ import re
 from sqlalchemy import  __version__ as sqav
 from sqlalchemy.orm.query import Query
 from webhelpers.html.builder import HTML
-from routes import url_for
+from ckan.lib.helpers import url_for
 
 
 class AlphaPage(object):
@@ -47,7 +49,7 @@ class AlphaPage(object):
         self.controller_name = controller_name
 
         self.letters = [char for char in 'ABCDEFGHIJKLMNOPQRSTUVWXYZ'] + [self.other_text]
-        
+
         # Work out which alphabet letters are 'available' i.e. have some results
         # because we grey-out those which aren't.
         self.available = dict( (c,0,) for c in self.letters )

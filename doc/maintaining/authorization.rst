@@ -44,12 +44,18 @@ dataset searches but are shown in dataset searches within the organization.
 When a user joins an organization, an organization admin gives them one of
 three roles: member, editor or admin.
 
-An organization **admin** can:
+A **member** can:
 
-* View the organization's private datasets
+* View the organization's private datasets.
+
+An **editor** can do everything as **member** plus:
+
 * Add new datasets to the organization
 * Edit or delete any of the organization's datasets
-* Make  datasets public or private.
+* Make datasets public or private.
+
+An organization **admin** can do everything as **editor** plus:
+
 * Add users to the organization, and choose whether to make the new user a
   member, editor or admin
 * Change the role of any user in the organization, including other admin users
@@ -57,16 +63,6 @@ An organization **admin** can:
 * Edit the organization itself (for example: change the organization's title,
   description or image)
 * Delete the organization
-
-An **editor** can:
-
-* View the organization's private datasets
-* Add new datasets to the organization
-* Edit or delete any of the organization's datasets
-
-A **member** can:
-
-* View the organization's private datasets.
 
 When a user creates a new organization, they automatically become the first
 admin of that organization.
@@ -86,5 +82,14 @@ Extensions
 
 CKAN extensions can implement custom authorization rules by overriding the
 authorization functions that CKAN uses. This is done by implementing the
-:py:class:`~ckan.plugins.interfaces.IAuthFunctions` plugin interface. To get
-started with writing CKAN extensions, see :doc:`/extensions/index`.
+:py:class:`~ckan.plugins.interfaces.IAuthFunctions` plugin interface.
+
+Dataset visibility is determined by permission labels stored in the
+search index.
+Implement the :py:class:`~ckan.plugins.interfaces.IPermissionLabels`
+plugin interface then :ref:`rebuild your search index <rebuild search index>`
+to change your dataset visibility rules. There is no
+no need to override the ``package_show`` auth function, it will inherit
+these changes automatically.
+
+To get started with writing CKAN extensions, see :doc:`/extensions/index`.

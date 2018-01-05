@@ -44,16 +44,18 @@ file you created in :doc:`install-from-source` earlier:
     cp |development.ini| |production.ini|
 
 
------------------------------
-2. Install Apache and modwsgi
------------------------------
+-----------------------------------
+2. Install Apache, modwsgi, modrpaf
+-----------------------------------
 
-Install Apache_ (a web server) and modwsgi_ (an Apache module that adds WSGI
-support to Apache)::
+Install Apache_ (a web server), modwsgi_ (an Apache module that adds WSGI
+support to Apache), and modrpaf_ (an Apache module that sets the right IP
+address when there is a proxy forwarding to Apache)::
 
-  sudo apt-get install apache2 libapache2-mod-wsgi
+  sudo apt-get install apache2 libapache2-mod-wsgi libapache2-mod-rpaf
 
 .. _modwsgi: https://code.google.com/p/modwsgi/
+.. _modrpaf: https://github.com/gnif/mod_rpaf
 
 
 ----------------
@@ -115,7 +117,7 @@ following contents:
 
 .. parsed-literal::
 
-    <VirtualHost 0.0.0.0:8080>
+    <VirtualHost 127.0.0.1:8080>
         ServerName default.ckanhosted.com
         ServerAlias www.default.ckanhosted.com
         WSGIScriptAlias / |apache.wsgi|
@@ -130,10 +132,31 @@ following contents:
 
         ErrorLog /var/log/apache2/ckan_default.error.log
         CustomLog /var/log/apache2/ckan_default.custom.log combined
+
+        <IfModule mod_rpaf.c>
+            RPAFenable On
+            RPAFsethostname On
+            RPAFproxy_ips 127.0.0.1
+        </IfModule>
+
+        <Directory />
+            Require all granted
+        </Directory>
+
     </VirtualHost>
 
 Replace ``default.ckanhosted.com`` and ``www.default.ckanhosted.com`` with the
 domain name for your site.
+
+.. note::
+
+    If you are running |apache| 2.2 or lower (eg on Ubuntu 12.04), remove this directive,
+    as it is not supported::
+
+        <Directory />
+            Require all granted
+        </Directory>
+
 
 This tells the Apache modwsgi module to redirect any requests to the web server
 to the WSGI script that you created above. Your WSGI script in turn directs the
@@ -143,18 +166,38 @@ requests to your CKAN instance.
 7. Modify the Apache ports.conf file
 ------------------------------------
 
-Open ``/etc/apache2/ports.conf``. Look in the file for the following lines:
+Open ``/etc/apache2/ports.conf``. We need to replace the default port 80 with the 8080 one.
 
-.. parsed-literal::
 
-    NameVirtualHost \*:80
-    Listen 80
+   - On Apache 2.4 (eg Ubuntu 14.04 or RHEL 7):
 
-Change the entries from ``80`` to ``8080`` to look like the following:
+     Replace this line:
 
-.. parsed-literal::
-    NameVirtualHost \*:8080
-    Listen 8080
+        .. parsed-literal::
+
+            Listen 80
+
+     With this one:
+
+        .. parsed-literal::
+
+            Listen 8080
+
+
+   - On Apache 2.2 (eg Ubuntu 12.04 or RHEL 6):
+
+     Replace these lines:
+
+        .. parsed-literal::
+
+            NameVirtualHost \*:80
+            Listen 80
+
+     With these ones:
+
+        .. parsed-literal::
+            NameVirtualHost \*:8080
+            Listen 8080
 
 -------------------------------
 8. Create the Nginx config file
@@ -172,6 +215,7 @@ following contents:
         client_max_body_size 100M;
         location / {
             proxy_pass http://127.0.0.1:8080/;
+            proxy_set_header X-Forwarded-For $remote_addr;
             proxy_set_header Host $host;
             proxy_cache cache;
             proxy_cache_bypass $cookie_auth_tkt;
@@ -189,17 +233,30 @@ following contents:
 9. Enable your CKAN site
 ------------------------
 
-Finally, enable your CKAN site in Apache:
+To prevent conflicts, disable your default nginx and apache sites.  Finally, enable your CKAN site in Apache:
 
 .. parsed-literal::
 
     sudo a2ensite ckan_default
+    sudo a2dissite 000-default
+    sudo rm -vi /etc/nginx/sites-enabled/default
     sudo ln -s |nginx_config_file| /etc/nginx/sites-enabled/ckan_default
     |reload_apache|
     |reload_nginx|
 
 You should now be able to visit your server in a web browser and see your new
 CKAN instance.
+
+
+--------------------------------------
+10. Setup a worker for background jobs
+--------------------------------------
+CKAN uses asynchronous :ref:`background jobs` for long tasks. These jobs are
+executed by a separate process which is called a :ref:`worker <background jobs
+workers>`.
+
+To run the worker in a robust way, :ref:`install and configure Supervisor
+<background jobs supervisor>`.
 
 
 ---------------

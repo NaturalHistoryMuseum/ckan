@@ -1,3 +1,5 @@
+# encoding: utf-8
+
 from datetime import datetime, timedelta
 
 from pylons.i18n import get_lang
@@ -15,7 +17,7 @@ class RevisionController(base.BaseController):
     def __before__(self, action, **env):
         base.BaseController.__before__(self, action, **env)
 
-        context = {'model': model, 'user': c.user or c.author,
+        context = {'model': model, 'user': c.user,
                    'auth_user_obj': c.userobj}
         if c.user:
             try:
@@ -28,7 +30,7 @@ class RevisionController(base.BaseController):
         try:
             logic.check_access('site_read', context)
         except logic.NotAuthorized:
-            base.abort(401, _('Not authorized to see this page'))
+            base.abort(403, _('Not authorized to see this page'))
 
     def index(self):
         return self.list()
@@ -62,8 +64,6 @@ class RevisionController(base.BaseController):
                 package_indications = []
                 revision_changes = model.repo.list_changes(revision)
                 resource_revisions = revision_changes[model.Resource]
-                resource_group_revisions = \
-                    revision_changes[model.ResourceGroup]
                 package_extra_revisions = revision_changes[model.PackageExtra]
                 for package in revision.packages:
                     if not package:
@@ -89,15 +89,8 @@ class RevisionController(base.BaseController):
                     else:
                         transition = 'updated'
                         for resource_revision in resource_revisions:
-                            if resource_revision.continuity.resource_group.\
-                                    package_id == package.id:
+                            if resource_revision.package_id == package.id:
                                 transition += ':resources'
-                                break
-                        for resource_group_revision in \
-                                resource_group_revisions:
-                            if resource_group_revision.package_id == \
-                                    package.id:
-                                transition += ':resource_group'
                                 break
                         for package_extra_revision in package_extra_revisions:
                             if package_extra_revision.package_id == \
@@ -131,7 +124,7 @@ class RevisionController(base.BaseController):
             query = model.Session.query(model.Revision)
             c.page = h.Page(
                 collection=query,
-                page=request.params.get('page', 1),
+                page=h.get_page_number(request.params),
                 url=h.pager_url,
                 items_per_page=20
             )
@@ -188,7 +181,7 @@ class RevisionController(base.BaseController):
         if action in ['delete', 'undelete']:
             # this should be at a lower level (e.g. logic layer)
             if not c.revision_change_state_allowed:
-                base.abort(401)
+                base.abort(403)
             if action == 'delete':
                 revision.state = model.State.DELETED
             elif action == 'undelete':

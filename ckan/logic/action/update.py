@@ -1,13 +1,18 @@
+# encoding: utf-8
+
 '''API functions for updating existing data in CKAN.'''
 
 import logging
 import datetime
+import time
 import json
+import mimetypes
+import os
 
-from pylons import config
-from vdm.sqlalchemy.base import SQLAlchemySession
+from ckan.common import config
 import paste.deploy.converters as converters
 
+import ckan.lib.helpers as h
 import ckan.plugins as plugins
 import ckan.logic as logic
 import ckan.logic.schema as schema_
@@ -19,8 +24,10 @@ import ckan.lib.navl.validators as validators
 import ckan.lib.plugins as lib_plugins
 import ckan.lib.email_notifications as email_notifications
 import ckan.lib.search as search
-import ckan.lib.datapreview as datapreview
 import ckan.lib.uploader as uploader
+import ckan.lib.datapreview
+import ckan.lib.app_globals as app_globals
+
 
 from ckan.common import _, request
 
@@ -35,154 +42,6 @@ _check_access = logic.check_access
 NotFound = logic.NotFound
 ValidationError = logic.ValidationError
 _get_or_bust = logic.get_or_bust
-
-def _make_latest_rev_active(context, q):
-
-    session = context['model'].Session
-
-    old_current = q.filter_by(current=True).first()
-    if old_current:
-        old_current.current = False
-        session.add(old_current)
-
-    latest_rev = q.filter_by(expired_timestamp=datetime.datetime(9999, 12, 31)).one()
-    latest_rev.current = True
-    if latest_rev.state in ('pending-deleted', 'deleted'):
-        latest_rev.state = 'deleted'
-        latest_rev.continuity.state = 'deleted'
-    else:
-        latest_rev.continuity.state = 'active'
-        latest_rev.state = 'active'
-
-    session.add(latest_rev)
-
-    ##this is just a way to get the latest revision that changed
-    ##in order to timestamp
-    old_latest = context.get('latest_revision_date')
-    if old_latest:
-        if latest_rev.revision_timestamp > old_latest:
-            context['latest_revision_date'] = latest_rev.revision_timestamp
-            context['latest_revision'] = latest_rev.revision_id
-    else:
-        context['latest_revision_date'] = latest_rev.revision_timestamp
-        context['latest_revision'] = latest_rev.revision_id
-
-def make_latest_pending_package_active(context, data_dict):
-    '''
-
-    .. todo:: What does this function do?
-
-    You must be authorized to update the dataset.
-
-    :param id: the name or id of the dataset, e.g. ``'warandpeace'``
-    :type id: string
-
-    '''
-    model = context['model']
-    session = model.Session
-    SQLAlchemySession.setattr(session, 'revisioning_disabled', True)
-    id = _get_or_bust(data_dict, "id")
-    pkg = model.Package.get(id)
-
-    _check_access('make_latest_pending_package_active', context, data_dict)
-
-    #packages
-    q = session.query(model.PackageRevision).filter_by(id=pkg.id)
-    _make_latest_rev_active(context, q)
-
-    #resources
-    for resource in pkg.resource_groups_all[0].resources_all:
-        q = session.query(model.ResourceRevision).filter_by(id=resource.id)
-        _make_latest_rev_active(context, q)
-
-    #tags
-    for tag in pkg.package_tag_all:
-        q = session.query(model.PackageTagRevision).filter_by(id=tag.id)
-        _make_latest_rev_active(context, q)
-
-    #extras
-    for extra in pkg.extras_list:
-        q = session.query(model.PackageExtraRevision).filter_by(id=extra.id)
-        _make_latest_rev_active(context, q)
-
-    latest_revision = context.get('latest_revision')
-    if not latest_revision:
-        return
-
-    q = session.query(model.Revision).filter_by(id=latest_revision)
-    revision = q.first()
-    revision.approved_timestamp = datetime.datetime.now()
-    session.add(revision)
-
-    if not context.get('defer_commit'):
-        session.commit()
-
-
-def related_update(context, data_dict):
-    '''Update a related item.
-
-    You must be the owner of a related item to update it.
-
-    For further parameters see
-    :py:func:`~ckan.logic.action.create.related_create`.
-
-    :param id: the id of the related item to update
-    :type id: string
-
-    :returns: the updated related item
-    :rtype: dictionary
-
-    '''
-    model = context['model']
-    id = _get_or_bust(data_dict, "id")
-
-    session = context['session']
-    schema = context.get('schema') or schema_.default_update_related_schema()
-
-    related = model.Related.get(id)
-    context["related"] = related
-
-    if not related:
-        logging.error('Could not find related ' + id)
-        raise NotFound(_('Item was not found.'))
-
-    _check_access('related_update', context, data_dict)
-    data, errors = _validate(data_dict, schema, context)
-    if errors:
-        model.Session.rollback()
-        raise ValidationError(errors)
-
-    related = model_save.related_dict_save(data, context)
-
-    dataset_dict = None
-    if 'package' in context:
-        dataset = context['package']
-        dataset_dict = ckan.lib.dictization.table_dictize(dataset, context)
-
-    related_dict = model_dictize.related_dictize(related, context)
-    activity_dict = {
-        'user_id': context['user'],
-        'object_id': related.id,
-        'activity_type': 'changed related item',
-    }
-    activity_dict['data'] = {
-        'related': related_dict,
-        'dataset': dataset_dict,
-    }
-    activity_create_context = {
-        'model': model,
-        'user': context['user'],
-        'defer_commit': True,
-        'ignore_auth': True,
-        'session': session
-    }
-
-    _get_action('activity_create')(activity_create_context, activity_dict)
-
-    if not context.get('defer_commit'):
-        model.repo.commit()
-    return model_dictize.related_dictize(related, context)
-
 
 
 def resource_update(context, data_dict):
@@ -205,42 +64,78 @@ def resource_update(context, data_dict):
     user = context['user']
     id = _get_or_bust(data_dict, "id")
 
+    if not data_dict.get('url'):
+        data_dict['url'] = ''
+
     resource = model.Resource.get(id)
     context["resource"] = resource
+    old_resource_format = resource.format
 
     if not resource:
-        logging.error('Could not find resource ' + id)
+        log.debug('Could not find resource %s', id)
         raise NotFound(_('Resource was not found.'))
 
     _check_access('resource_update', context, data_dict)
     del context["resource"]
 
-    package_id = resource.resource_group.package.id
-    pkg_dict = _get_action('package_show')(context, {'id': package_id})
+    package_id = resource.package.id
+    pkg_dict = _get_action('package_show')(dict(context, return_type='dict'),
+        {'id': package_id})
 
     for n, p in enumerate(pkg_dict['resources']):
         if p['id'] == id:
             break
     else:
-        logging.error('Could not find resource ' + id)
+        log.error('Could not find resource %s after all', id)
         raise NotFound(_('Resource was not found.'))
 
-    upload = uploader.ResourceUpload(data_dict)
+    # Persist the datastore_active extra if already present and not provided
+    if ('datastore_active' in resource.extras and
+            'datastore_active' not in data_dict):
+        data_dict['datastore_active'] = resource.extras['datastore_active']
+
+    for plugin in plugins.PluginImplementations(plugins.IResourceController):
+        plugin.before_update(context, pkg_dict['resources'][n], data_dict)
+
+    upload = uploader.get_resource_uploader(data_dict)
+
+    if 'mimetype' not in data_dict:
+        if hasattr(upload, 'mimetype'):
+            data_dict['mimetype'] = upload.mimetype
+
+    if 'size' not in data_dict and 'url_type' in data_dict:
+        if hasattr(upload, 'filesize'):
+            data_dict['size'] = upload.filesize
 
     pkg_dict['resources'][n] = data_dict
 
     try:
         context['defer_commit'] = True
         context['use_cache'] = False
-        pkg_dict = _get_action('package_update')(context, pkg_dict)
+        updated_pkg_dict = _get_action('package_update')(context, pkg_dict)
         context.pop('defer_commit')
     except ValidationError, e:
-        errors = e.error_dict['resources'][n]
-        raise ValidationError(errors)
+        try:
+            raise ValidationError(e.error_dict['resources'][-1])
+        except (KeyError, IndexError):
+            raise ValidationError(e.error_dict)
 
     upload.upload(id, uploader.get_max_resource_size())
     model.repo.commit()
-    return _get_action('resource_show')(context, {'id': id})
+
+    resource = _get_action('resource_show')(context, {'id': id})
+
+    if old_resource_format != resource['format']:
+        _get_action('resource_create_default_resource_views')(
+            {'model': context['model'], 'user': context['user'],
+             'ignore_auth': True},
+            {'package': updated_pkg_dict,
+             'resource': resource})
+
+    for plugin in plugins.PluginImplementations(plugins.IResourceController):
+        plugin.after_update(context, resource)
+
+    return resource
 
 
 def resource_view_update(context, data_dict):
@@ -260,15 +155,14 @@ def resource_view_update(context, data_dict):
     '''
     model = context['model']
     id = _get_or_bust(data_dict, "id")
-    schema = (context.get('schema') or
-              ckan.logic.schema.default_update_resource_view_schema())
-
 
     resource_view = model.ResourceView.get(id)
     if not resource_view:
         raise NotFound
 
-    view_plugin = datapreview.get_view_plugin(resource_view.view_type)
+    view_plugin = ckan.lib.datapreview.get_view_plugin(resource_view.view_type)
+    schema = (context.get('schema') or
+              schema_.default_update_resource_view_schema(view_plugin))
     plugin_schema = view_plugin.info().get('schema', {})
     schema.update(plugin_schema)
 
@@ -277,7 +171,7 @@ def resource_view_update(context, data_dict):
         model.Session.rollback()
         raise ValidationError(errors)
 
-    context["resource_view"] = resource_view
+    context['resource_view'] = resource_view
     context['resource'] = model.Resource.get(resource_view.resource_id)
 
     _check_access('resource_view_update', context, data_dict)
@@ -338,7 +232,7 @@ def package_update(context, data_dict):
 
     You must be authorized to edit the dataset and the groups that it belongs
     to.
-    
+
     It is recommended to call
     :py:func:`ckan.logic.action.get.package_show`, make the desired changes to
     the result, and then call ``package_update()`` with it.
@@ -361,13 +255,16 @@ def package_update(context, data_dict):
     '''
     model = context['model']
     user = context['user']
-    name_or_id = data_dict.get("id") or data_dict['name']
+    name_or_id = data_dict.get('id') or data_dict.get('name')
+    if name_or_id is None:
+        raise ValidationError({'id': _('Missing value')})
 
     pkg = model.Package.get(name_or_id)
     if pkg is None:
         raise NotFound(_('Package was not found.'))
     context["package"] = pkg
     data_dict["id"] = pkg.id
+    data_dict['type'] = pkg.type
 
     _check_access('package_update', context, data_dict)
 
@@ -419,9 +316,16 @@ def package_update(context, data_dict):
     context_org_update = context.copy()
     context_org_update['ignore_auth'] = True
     context_org_update['defer_commit'] = True
+    context_org_update['add_revision'] = False
     _get_action('package_owner_org_update')(context_org_update,
                                             {'id': pkg.id,
                                              'organization_id': pkg.owner_org})
+
+    # Needed to let extensions know the new resources ids
+    model.Session.flush()
+    if data.get('resources'):
+        for index, resource in enumerate(data['resources']):
+            resource['id'] = pkg.resources[index].id
 
     for item in plugins.PluginImplementations(plugins.IPackageController):
         item.edit(pkg)
@@ -506,22 +410,23 @@ def _update_package_relationship(relationship, comment, context):
                                     ref_package_by=ref_package_by)
     return rel_dict
 
+
 def package_relationship_update(context, data_dict):
     '''Update a relationship between two datasets (packages).
 
+    The subject, object and type parameters are required to identify the
+    relationship. Only the comment can be updated.
+
     You must be authorized to edit both the subject and the object datasets.
 
-    :param id: the id of the package relationship to update
-    :type id: string
     :param subject: the name or id of the dataset that is the subject of the
-        relationship (optional)
+        relationship
     :type subject: string
     :param object: the name or id of the dataset that is the object of the
-        relationship (optional)
+        relationship
     :param type: the type of the relationship, one of ``'depends_on'``,
         ``'dependency_of'``, ``'derives_from'``, ``'has_derivation'``,
         ``'links_to'``, ``'linked_from'``, ``'child_of'`` or ``'parent_of'``
-        (optional)
     :type type: string
     :param comment: a comment about the relationship (optional)
     :type comment: string
@@ -531,7 +436,8 @@ def package_relationship_update(context, data_dict):
 
     '''
     model = context['model']
-    schema = context.get('schema') or schema_.default_update_relationship_schema()
+    schema = context.get('schema') \
+        or schema_.default_update_relationship_schema()
 
     id, id2, rel = _get_or_bust(data_dict, ['subject', 'object', 'type'])
 
@@ -557,6 +463,7 @@ def package_relationship_update(context, data_dict):
     context['relationship'] = entity
     return _update_package_relationship(entity, comment, context)
 
+
 def _group_or_org_update(context, data_dict, is_org=False):
     model = context['model']
     user = context['user']
@@ -568,18 +475,20 @@ def _group_or_org_update(context, data_dict, is_org=False):
     if group is None:
         raise NotFound('Group was not found.')
 
+    data_dict['type'] = group.type
+
     # get the schema
     group_plugin = lib_plugins.lookup_group_plugin(group.type)
     try:
-        schema = group_plugin.form_to_db_schema_options({'type':'update',
-                                               'api':'api_version' in context,
+        schema = group_plugin.form_to_db_schema_options({'type': 'update',
+                                               'api': 'api_version' in context,
                                                'context': context})
     except AttributeError:
         schema = group_plugin.form_to_db_schema()
 
-    upload = uploader.Upload('group', group.image_url)
+    upload = uploader.get_uploader('group', group.image_url)
     upload.update_data_dict(data_dict, 'image_url',
-                           'image_upload', 'clear_upload')
+                            'image_upload', 'clear_upload')
 
     if is_org:
         _check_access('organization_update', context, data_dict)
@@ -665,11 +574,12 @@ def _group_or_org_update(context, data_dict, is_org=False):
         # in the group.
 
     upload.upload(uploader.get_max_image_size())
+
     if not context.get('defer_commit'):
         model.repo.commit()
 
-
     return model_dictize.group_dictize(group, context)
+
 
 def group_update(context, data_dict):
     '''Update a group.
@@ -690,6 +600,9 @@ def group_update(context, data_dict):
     :rtype: dictionary
 
     '''
+    # Callers that set context['allow_partial_update'] = True can choose to not
+    # specify particular keys and they will be left at their existing
+    # values. This includes: packages, users, groups, tags, extras
     return _group_or_org_update(context, data_dict)
 
 def organization_update(context, data_dict):
@@ -710,13 +623,16 @@ def organization_update(context, data_dict):
     :rtype: dictionary
 
     '''
+    # Callers that set context['allow_partial_update'] = True can choose to not
+    # specify particular keys and they will be left at their existing
+    # values. This includes: users, groups, tags, extras
     return _group_or_org_update(context, data_dict, is_org=True)
 
 def user_update(context, data_dict):
     '''Update a user account.
 
     Normal users can only update their own user accounts. Sysadmins can update
-    any user account.
+    any user account. Can not modify exisiting user's name.
 
     For further parameters see
     :py:func:`~ckan.logic.action.create.user_create`.
@@ -745,6 +661,10 @@ def user_update(context, data_dict):
     if errors:
         session.rollback()
         raise ValidationError(errors)
+
+    # user schema prevents non-sysadmins from providing password_hash
+    if 'password_hash' in data:
+        data['_password'] = data.pop('password_hash')
 
     user = model_save.user_dict_save(data, context)
 
@@ -860,7 +780,7 @@ def task_status_update_many(context, data_dict):
     '''Update many task statuses at once.
 
     :param data: the task_status dictionaries to update, for the format of task
-        status dictionaries see 
+        status dictionaries see
         :py:func:`~task_status_update`
     :type data: list of dictionaries
 
@@ -1076,100 +996,6 @@ def package_relationship_update_rest(context, data_dict):
 
     return relationship_dict
 
-def user_role_update(context, data_dict):
-    '''Update a user or authorization group's roles for a domain object.
-
-    The ``user`` parameter must be given.
-
-    You must be authorized to update the domain object.
-
-    To delete all of a user or authorization group's roles for domain object,
-    pass an empty list ``[]`` to the ``roles`` parameter.
-
-    :param user: the name or id of the user
-    :type user: string
-    :param domain_object: the name or id of the domain object (e.g. a package,
-        group or authorization group)
-    :type domain_object: string
-    :param roles: the new roles, e.g. ``['editor']``
-    :type roles: list of strings
-
-    :returns: the updated roles of all users for the
-        domain object
-    :rtype: dictionary
-
-    '''
-    model = context['model']
-
-    new_user_ref = data_dict.get('user') # the user who is being given the new role
-    if not bool(new_user_ref):
-        raise ValidationError('You must provide the "user" parameter.')
-    domain_object_ref = _get_or_bust(data_dict, 'domain_object')
-    if not isinstance(data_dict['roles'], (list, tuple)):
-        raise ValidationError('Parameter "%s" must be of type: "%s"' % ('role', 'list'))
-    desired_roles = set(data_dict['roles'])
-
-    if new_user_ref:
-        user_object = model.User.get(new_user_ref)
-        if not user_object:
-            raise NotFound('Cannot find user %r' % new_user_ref)
-        data_dict['user'] = user_object.id
-        add_user_to_role_func = model.add_user_to_role
-        remove_user_from_role_func = model.remove_user_from_role
-
-    domain_object = logic.action.get_domain_object(model, domain_object_ref)
-    data_dict['id'] = domain_object.id
-
-    # current_uors: in order to avoid either creating a role twice or
-    # deleting one which is non-existent, we need to get the users\'
-    # current roles (if any)
-    current_role_dicts = _get_action('roles_show')(context, data_dict)['roles']
-    current_roles = set([role_dict['role'] for role_dict in current_role_dicts])
-
-    # Whenever our desired state is different from our current state,
-    # change it.
-    for role in (desired_roles - current_roles):
-        add_user_to_role_func(user_object, role, domain_object)
-    for role in (current_roles - desired_roles):
-        remove_user_from_role_func(user_object, role, domain_object)
-
-    # and finally commit all these changes to the database
-    if not (current_roles == desired_roles):
-        model.repo.commit_and_remove()
-
-    return _get_action('roles_show')(context, data_dict)
-
-def user_role_bulk_update(context, data_dict):
-    '''Update the roles of many users or authorization groups for an object.
-
-    You must be authorized to update the domain object.
-
-    :param user_roles: the updated user roles, for the format of user role
-        dictionaries see :py:func:`~user_role_update`
-    :type user_roles: list of dictionaries
-
-    :returns: the updated roles of all users and authorization groups for the
-        domain object
-    :rtype: dictionary
-
-    '''
-    # Collate all the roles for each user
-    roles_by_user = {} # user:roles
-    for user_role_dict in data_dict['user_roles']:
-        user = user_role_dict.get('user')
-        if user:
-            roles = user_role_dict['roles']
-            if user not in roles_by_user:
-                roles_by_user[user] = []
-            roles_by_user[user].extend(roles)
-    # For each user, update its roles
-    for user in roles_by_user:
-        uro_data_dict = {'user': user,
-                         'roles': roles_by_user[user],
-                         'domain_object': data_dict['domain_object']}
-        user_role_update(context, uro_data_dict)
-    return _get_action('roles_show')(context, data_dict)
-
 
 def dashboard_mark_activities_old(context, data_dict):
     '''Mark all the authorized user's new dashboard activities as old.
@@ -1183,7 +1009,7 @@ def dashboard_mark_activities_old(context, data_dict):
     model = context['model']
     user_id = model.User.get(context['user']).id
     model.Dashboard.get(user_id).activity_stream_last_viewed = (
-            datetime.datetime.now())
+            datetime.datetime.utcnow())
     if not context.get('defer_commit'):
         model.repo.commit()
 
@@ -1221,6 +1047,7 @@ def package_owner_org_update(context, data_dict):
     :type id: string
     '''
     model = context['model']
+    user = context['user']
     name_or_id = data_dict.get('id')
     organization_id = data_dict.get('organization_id')
 
@@ -1240,10 +1067,17 @@ def package_owner_org_update(context, data_dict):
         org = None
         pkg.owner_org = None
 
+    if context.get('add_revision', True):
+        rev = model.repo.new_revision()
+        rev.author = user
+        if 'message' in context:
+            rev.message = context['message']
+        else:
+            rev.message = _(u'REST API: Update object %s') % pkg.get("name")
 
     members = model.Session.query(model.Member) \
-            .filter(model.Member.table_id == pkg.id) \
-            .filter(model.Member.capacity == 'organization')
+        .filter(model.Member.table_id == pkg.id) \
+        .filter(model.Member.capacity == 'organization')
 
     need_update = True
     for member_obj in members:
@@ -1274,7 +1108,6 @@ def _bulk_update_dataset(context, data_dict, update_dict):
     org_id = data_dict.get('org_id')
 
     model = context['model']
-
     model.Session.query(model.package_table) \
         .filter(model.Package.id.in_(datasets)) \
         .filter(model.Package.owner_org == org_id) \
@@ -1284,7 +1117,7 @@ def _bulk_update_dataset(context, data_dict, update_dict):
     model.Session.query(model.package_revision_table) \
         .filter(model.PackageRevision.id.in_(datasets)) \
         .filter(model.PackageRevision.owner_org == org_id) \
-        .filter(model.PackageRevision.current == True) \
+        .filter(model.PackageRevision.current is True) \
         .update(update_dict, synchronize_session=False)
 
     model.Session.commit()
@@ -1315,7 +1148,7 @@ def _bulk_update_dataset(context, data_dict, update_dict):
     count = 0
     q = []
     for id in datasets:
-        q.append('id:%s' % (id))
+        q.append('id:"%s"' % (id))
         count += 1
         if count % BATCH_SIZE == 0:
             process_solr(' OR '.join(q))
@@ -1364,3 +1197,104 @@ def bulk_update_delete(context, data_dict):
 
     _check_access('bulk_update_delete', context, data_dict)
     _bulk_update_dataset(context, data_dict, {'state': 'deleted'})
+
+
+def config_option_update(context, data_dict):
+    '''
+
+    .. versionadded:: 2.4
+
+    Allows to modify some CKAN runtime-editable config options
+
+    It takes arbitrary key, value pairs and checks the keys against the
+    config options update schema. If some of the provided keys are not present
+    in the schema a :py:class:`~ckan.plugins.logic.ValidationError` is raised.
+    The values are then validated against the schema, and if validation is
+    passed, for each key, value config option:
+
+    * It is stored on the ``system_info`` database table
+    * The Pylons ``config`` object is updated.
+    * The ``app_globals`` (``g``) object is updated (this only happens for
+      options explicitly defined in the ``app_globals`` module.
+
+    The following lists a ``key`` parameter, but this should be replaced by
+    whichever config options want to be updated, eg::
+
+        get_action('config_option_update)({}, {
+            'ckan.site_title': 'My Open Data site',
+            'ckan.homepage_layout': 2,
+        })
+
+    :param key: a configuration option key (eg ``ckan.site_title``). It must
+        be present on the ``update_configuration_schema``
+    :type key: string
+
+    :returns: a dictionary with the options set
+    :rtype: dictionary
+
+    .. note:: You can see all available runtime-editable configuration options
+        calling
+        the :py:func:`~ckan.logic.action.get.config_option_list` action
+
+    .. note:: Extensions can modify which configuration options are
+        runtime-editable.
+        For details, check :doc:`/extensions/remote-config-update`.
+
+    .. warning:: You should only add config options that you are comfortable
+        they can be edited during runtime, such as ones you've added in your
+        own extension, or have reviewed the use of in core CKAN.
+
+    '''
+    model = context['model']
+
+    _check_access('config_option_update', context, data_dict)
+
+    schema = schema_.update_configuration_schema()
+
+    available_options = schema.keys()
+
+    provided_options = data_dict.keys()
+
+    unsupported_options = set(provided_options) - set(available_options)
+    if unsupported_options:
+        msg = 'Configuration option(s) \'{0}\' can not be updated'.format(
+              ' '.join(list(unsupported_options)))
+
+        raise ValidationError(msg, error_summary={'message': msg})
+
+    upload = uploader.get_uploader('admin')
+    upload.update_data_dict(data_dict, 'ckan.site_logo',
+                            'logo_upload', 'clear_logo_upload')
+    upload.upload(uploader.get_max_image_size())
+    data, errors = _validate(data_dict, schema, context)
+    if errors:
+        model.Session.rollback()
+        raise ValidationError(errors)
+
+    for key, value in data.iteritems():
+
+        # Set full Logo url
+        if key == 'ckan.site_logo' and value and not value.startswith('http')\
+                and not value.startswith('/'):
+            image_path = 'uploads/admin/'
+
+            value = h.url_for_static('{0}{1}'.format(image_path, value))
+
+        # Save value in database
+        model.set_system_info(key, value)
+
+        # Update CKAN's `config` object
+        config[key] = value
+
+        # Only add it to the app_globals (`g`) object if explicitly defined
+        # there
+        globals_keys = app_globals.app_globals_from_config_details.keys()
+        if key in globals_keys:
+            app_globals.set_app_global(key, value)
+
+    # Update the config update timestamp
+    model.set_system_info('ckan.config_update', str(time.time()))
+
+    log.info('Updated config options: {0}'.format(data))
+
+    return data

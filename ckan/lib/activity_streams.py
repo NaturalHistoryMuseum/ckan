@@ -1,3 +1,5 @@
+# encoding: utf-8
+
 import re
 
 from webhelpers.html import literal
@@ -6,7 +8,7 @@ import ckan.lib.helpers as h
 import ckan.lib.base as base
 import ckan.logic as logic
 
-from ckan.common import _
+from ckan.common import _, is_flask_request
 
 # get_snippet_*() functions replace placeholders like {user}, {dataset}, etc.
 # in activity strings with HTML representations of particular users, datasets,
@@ -24,7 +26,8 @@ def get_snippet_user(activity, detail):
 
 def get_snippet_dataset(activity, detail):
     data = activity['data']
-    link = h.dataset_link(data.get('package') or data.get('dataset'))
+    pkg_dict = data.get('package') or data.get('dataset')
+    link = h.dataset_link(pkg_dict) if pkg_dict else ''
     return literal('''<span>%s</span>'''
         % (link)
         )
@@ -47,13 +50,6 @@ def get_snippet_extra(activity, detail):
 def get_snippet_resource(activity, detail):
     return h.resource_link(detail['data']['resource'],
                            activity['data']['package']['id'])
-
-def get_snippet_related_item(activity, detail):
-    return h.related_item_link(activity['data']['related'])
-
-def get_snippet_related_type(activity, detail):
-    # FIXME this needs to be translated
-    return activity['data']['related']['type']
 
 # activity_stream_string_*() functions return translatable string
 # representations of activity types, the strings contain placeholders like
@@ -80,13 +76,6 @@ def activity_stream_string_changed_resource(context, activity):
 
 def activity_stream_string_changed_user(context, activity):
     return _("{actor} updated their profile")
-
-def activity_stream_string_changed_related_item(context, activity):
-    if activity['data'].get('dataset'):
-        return _("{actor} updated the {related_type} {related_item} of the "
-                "dataset {dataset}")
-    else:
-        return _("{actor} updated the {related_type} {related_item}")
 
 def activity_stream_string_deleted_group(context, activity):
     return _("{actor} deleted the group {group}")
@@ -125,9 +114,6 @@ def activity_stream_string_new_user(context, activity):
 def activity_stream_string_removed_tag(context, activity):
     return _("{actor} removed the tag {tag} from the dataset {dataset}")
 
-def activity_stream_string_deleted_related_item(context, activity):
-    return _("{actor} deleted the related item {related_item}")
-
 def activity_stream_string_follow_dataset(context, activity):
     return _("{actor} started following {dataset}")
 
@@ -136,13 +122,6 @@ def activity_stream_string_follow_user(context, activity):
 
 def activity_stream_string_follow_group(context, activity):
     return _("{actor} started following {group}")
-
-def activity_stream_string_new_related_item(context, activity):
-    if activity['data'].get('dataset'):
-        return _("{actor} added the {related_type} {related_item} to the "
-                 "dataset {dataset}")
-    else:
-        return _("{actor} added the {related_type} {related_item}")
 
 # A dictionary mapping activity snippets to functions that expand the snippets.
 activity_snippet_functions = {
@@ -154,8 +133,6 @@ activity_snippet_functions = {
     'organization': get_snippet_organization,
     'extra': get_snippet_extra,
     'resource': get_snippet_resource,
-    'related_item': get_snippet_related_item,
-    'related_type': get_snippet_related_type,
 }
 
 # A dictionary mapping activity types to functions that return translatable
@@ -168,7 +145,6 @@ activity_stream_string_functions = {
   'changed package_extra': activity_stream_string_changed_package_extra,
   'changed resource': activity_stream_string_changed_resource,
   'changed user': activity_stream_string_changed_user,
-  'changed related item': activity_stream_string_changed_related_item,
   'deleted group': activity_stream_string_deleted_group,
   'deleted organization': activity_stream_string_deleted_organization,
   'deleted package': activity_stream_string_deleted_package,
@@ -181,36 +157,32 @@ activity_stream_string_functions = {
   'new resource': activity_stream_string_new_resource,
   'new user': activity_stream_string_new_user,
   'removed tag': activity_stream_string_removed_tag,
-  'deleted related item': activity_stream_string_deleted_related_item,
   'follow dataset': activity_stream_string_follow_dataset,
   'follow user': activity_stream_string_follow_user,
   'follow group': activity_stream_string_follow_group,
-  'new related item': activity_stream_string_new_related_item,
 }
 
 # A dictionary mapping activity types to the icons associated to them
 activity_stream_string_icons = {
   'added tag': 'tag',
-  'changed group': 'group',
+  'changed group': 'users',
   'changed package': 'sitemap',
-  'changed package_extra': 'edit',
+  'changed package_extra': 'pencil-square-o',
   'changed resource': 'file',
   'changed user': 'user',
-  'deleted group': 'group',
+  'deleted group': 'users',
   'deleted package': 'sitemap',
-  'deleted package_extra': 'edit',
+  'deleted package_extra': 'pencil-square-o',
   'deleted resource': 'file',
-  'new group': 'group',
+  'new group': 'users',
   'new package': 'sitemap',
-  'new package_extra': 'edit',
+  'new package_extra': 'pencil-square-o',
   'new resource': 'file',
   'new user': 'user',
   'removed tag': 'tag',
-  'deleted related item': 'picture',
   'follow dataset': 'sitemap',
   'follow user': 'user',
-  'follow group': 'group',
-  'new related item': 'picture',
+  'follow group': 'users',
   'changed organization': 'briefcase',
   'deleted organization': 'briefcase',
   'new organization': 'briefcase',
@@ -280,5 +252,11 @@ def activity_list_to_html(context, activity_stream, extra_vars):
                               'timestamp': activity['timestamp'],
                               'is_new': activity.get('is_new', False)})
     extra_vars['activities'] = activity_list
-    return literal(base.render('activity_streams/activity_stream_items.html',
-        extra_vars=extra_vars))
+
+    # TODO: Do this properly without having to check if it's Flask or not
+    if is_flask_request():
+        return base.render('activity_streams/activity_stream_items.html',
+                           extra_vars=extra_vars)
+    else:
+        return literal(base.render('activity_streams/activity_stream_items.html',
+                       extra_vars=extra_vars))

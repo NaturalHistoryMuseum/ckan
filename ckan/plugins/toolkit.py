@@ -1,20 +1,6 @@
-import inspect
-import os
-import re
+# encoding: utf-8
 
-import paste.deploy.converters as converters
-import webhelpers.html.tags
-
-__all__ = ['toolkit']
-
-
-class CkanVersionException(Exception):
-    '''Exception raised by
-    :py:func:`~ckan.plugins.toolkit.requires_ckan_version` if the required CKAN
-    version is not available.
-
-    '''
-    pass
+import sys
 
 
 class _Toolkit(object):
@@ -32,47 +18,96 @@ class _Toolkit(object):
     # contents should describe the available functions/objects. We check
     # that this list matches the actual availables in the initialisation
     contents = [
-        ## Imported functions/objects ##
-        '_',                    # i18n translation
-        'c',                    # template context
-        'request',              # http request object
-        'render',               # template render function
-        'render_text',          # Genshi NewTextTemplate render function
-        'render_snippet',       # snippet render function
-        'asbool',               # converts an object to a boolean
-        'asint',                # converts an object to an integer
-        'aslist',               # converts an object to a list
-        'literal',              # stop tags in a string being escaped
-        'get_action',           # get logic action function
-        'get_converter',        # get validator function
-        'get_validator',        # get convertor action function
-        'check_access',         # check logic function authorisation
-        'navl_validate',        # implements validate method with navl schema
-        'ObjectNotFound',       # action not found exception
-                                # (ckan.logic.NotFound)
-        'NotAuthorized',        # action not authorized exception
-        'UnknownConverter',     # convertor not found exception
-        'UnknownValidator',     # validator not found exception
-        'ValidationError',      # model update validation error
-        'Invalid',              # validation invalid exception
-        'CkanCommand',          # class for providing cli interfaces
-        'DefaultDatasetForm',   # base class for IDatasetForm plugins
-        'response',             # response object for cookies etc
-        'BaseController',       # Allow controllers to be created
-        'abort',                # abort actions
-        'redirect_to',          # allow redirections
-        'url_for',              # create urls
-        'get_or_bust',          # helpful for actions
-        'side_effect_free',     # actions can be accessed via api
-        'auth_sysadmins_check', # allow auth functions to be checked for sysadmins
-        'auth_allow_anonymous_access', # allow anonymous access to an auth function
-        'auth_disallow_anonymous_access', # disallow anonymous access to an auth function
-        'get_new_resources', # gets all new resources in current commit
+        # Global CKAN configuration object
+        'config',
+        # i18n translation
+        '_',
+        # i18n translation (plural form)
+        'ungettext',
+        # template context
+        'c',
+        # template helpers
+        'h',
+        # http request object
+        'request',
+        # template render function
+        'render',
+        # snippet render function
+        'render_snippet',
+        # converts a string to a boolean
+        'asbool',
+        # converts a string to an integer
+        'asint',
+        # converts a string to a list
+        'aslist',
+        # stop tags in a string being escaped
+        'literal',
+        # get logic action function
+        'get_action',
+        # decorator for chained action
+        'chained_action',
+        # get navl schema converter
+        'get_converter',
+        # get navl schema validator
+        'get_validator',
+        # check logic function authorisation
+        'check_access',
+        # implements validate method with navl schema
+        'navl_validate',
+        # placeholder for missing values for validation
+        'missing',
+        # action not found exception (ckan.logic.NotFound)
+        'ObjectNotFound',
+        # action not authorized exception
+        'NotAuthorized',
+        # validator not found exception
+        'UnknownValidator',
+        # model update validation error
+        'ValidationError',
+        # validation exception to stop further validators from being called
+        'StopOnError',
+        # validation invalid exception
+        'Invalid',
+        # old class for providing CLI interfaces
+        'CkanCommand',
+        # function for initializing CLI interfaces
+        'load_config',
+        # base class for IDatasetForm plugins
+        'DefaultDatasetForm',
+        # base class for IGroupForm plugins
+        'DefaultGroupForm',
+        # base class for IGroupForm plugins for orgs
+        'DefaultOrganizationForm',
+        # response object for cookies etc
+        'response',
+        # Allow controllers to be created
+        'BaseController',
+        # abort actions
+        'abort',
+        # allow redirections
+        'redirect_to',
+        # create urls
+        'url_for',
+        # helpful for actions
+        'get_or_bust',
+        # actions can be accessed via api
+        'side_effect_free',
+        # allow auth functions to be checked for sysadmins
+        'auth_sysadmins_check',
+        # allow anonymous access to an auth function
+        'auth_allow_anonymous_access',
+        # disallow anonymous access to an auth function
+        'auth_disallow_anonymous_access',
+        # Helper not found error.
+        'HelperError',
+        # Enqueue background job
+        'enqueue_job',
 
-        ## Fully defined in this file ##
+        # Fully defined in this file ##
         'add_template_directory',
         'add_resource',
         'add_public_directory',
+        'add_ckan_admin_tab',
         'requires_ckan_version',
         'check_ckan_version',
         'CkanVersionException',
@@ -101,8 +136,15 @@ class _Toolkit(object):
         import ckan.lib.cli as cli
         import ckan.lib.plugins as lib_plugins
         import ckan.common as common
-        import ckan.lib.datapreview as datapreview
+        from ckan.exceptions import (
+            CkanVersionException,
+            HelperError
+        )
+        from ckan.lib.jobs import enqueue as enqueue_job
+
+        from paste.deploy import converters
         import pylons
+        import webhelpers.html.tags
 
         # Allow class access to these modules
         self.__class__.ckan = ckan
@@ -111,15 +153,38 @@ class _Toolkit(object):
         t = self._toolkit
 
         # imported functions
-        t['_'] = common._
-        self.docstring_overrides['_'] = '''The Pylons ``_()`` function.
+        t['config'] = common.config
+        self.docstring_overrides['config'] = '''The CKAN configuration object.
 
-The Pylons ``_()`` function is a reference to the ``ugettext()`` function.
+It stores the configuration values defined in the :ref:`config_file`, eg::
+
+    title = toolkit.config.get("ckan.site_title")
+
+'''
+        t['_'] = common._
+        self.docstring_overrides['_'] = '''Translates a string to the
+current locale.
+
+The ``_()`` function is a reference to the ``ugettext()`` function.
 Everywhere in your code where you want strings to be internationalized
 (made available for translation into different languages), wrap them in the
 ``_()`` function, eg.::
 
     msg = toolkit._("Hello")
+
+Returns the localized unicode string.
+'''
+        t['ungettext'] = common.ungettext
+        self.docstring_overrides['ungettext'] = '''Translates a string with
+plural forms to the current locale.
+
+Mark a string for translation that has pural forms in the format
+``ungettext(singular, plural, n)``. Returns the localized unicode string of
+the pluralized value.
+
+Mark a string to be localized as follows::
+
+    msg = toolkit.ungettext("Mouse", "Mice", len(mouses))
 
 '''
         t['c'] = common.c
@@ -134,6 +199,7 @@ available throughout the template and application code, and are local to the
 current request.
 
 '''
+        t['h'] = h.helper_functions
         t['request'] = common.request
         self.docstring_overrides['request'] = '''The Pylons request object.
 
@@ -143,10 +209,9 @@ request body variables, cookies, the request URL, etc.
 
 '''
         t['render'] = base.render
-        t['render_text'] = base.render_text
         t['asbool'] = converters.asbool
-        self.docstring_overrides['asbool'] = '''Convert a string from the
-config file into a boolean.
+        self.docstring_overrides['asbool'] = '''Convert a string (e.g. 1,
+true, True) from the config file into a boolean.
 
 For example: ``if toolkit.asbool(config.get('ckan.legacy_templates', False)):``
 
@@ -159,8 +224,8 @@ For example: ``bar = toolkit.asint(config.get('ckan.foo.bar', 0))``
 
 '''
         t['aslist'] = converters.aslist
-        self.docstring_overrides['aslist'] = '''Convert a string from the
-config file into a list.
+        self.docstring_overrides['aslist'] = '''Convert a space-separated
+string from the config file into a list.
 
 For example: ``bar = toolkit.aslist(config.get('ckan.foo.bar', []))``
 
@@ -168,19 +233,24 @@ For example: ``bar = toolkit.aslist(config.get('ckan.foo.bar', []))``
         t['literal'] = webhelpers.html.tags.literal
 
         t['get_action'] = logic.get_action
-        t['get_converter'] = logic.get_converter
+        t['chained_action'] = logic.chained_action
+        t['get_converter'] = logic.get_validator  # For backwards compatibility
         t['get_validator'] = logic.get_validator
         t['check_access'] = logic.check_access
         t['navl_validate'] = dictization_functions.validate
+        t['missing'] = dictization_functions.missing
         t['ObjectNotFound'] = logic.NotFound  # Name change intentional
         t['NotAuthorized'] = logic.NotAuthorized
         t['ValidationError'] = logic.ValidationError
-        t['UnknownConverter'] = logic.UnknownConverter
+        t['StopOnError'] = dictization_functions.StopOnError
         t['UnknownValidator'] = logic.UnknownValidator
         t['Invalid'] = logic_validators.Invalid
 
         t['CkanCommand'] = cli.CkanCommand
+        t['load_config'] = cli.load_config
         t['DefaultDatasetForm'] = lib_plugins.DefaultDatasetForm
+        t['DefaultGroupForm'] = lib_plugins.DefaultGroupForm
+        t['DefaultOrganizationForm'] = lib_plugins.DefaultOrganizationForm
 
         t['response'] = pylons.response
         self.docstring_overrides['response'] = '''The Pylons response object.
@@ -198,17 +268,21 @@ content type, cookies, etc.
         t['side_effect_free'] = logic.side_effect_free
         t['auth_sysadmins_check'] = logic.auth_sysadmins_check
         t['auth_allow_anonymous_access'] = logic.auth_allow_anonymous_access
-        t['auth_disallow_anonymous_access'] = logic.auth_disallow_anonymous_access
-        t['get_new_resources'] = datapreview.get_new_resources
+        t['auth_disallow_anonymous_access'] = (
+            logic.auth_disallow_anonymous_access
+        )
 
         # class functions
         t['render_snippet'] = self._render_snippet
         t['add_template_directory'] = self._add_template_directory
         t['add_public_directory'] = self._add_public_directory
         t['add_resource'] = self._add_resource
+        t['add_ckan_admin_tab'] = self._add_ckan_admin_tabs
         t['requires_ckan_version'] = self._requires_ckan_version
         t['check_ckan_version'] = self._check_ckan_version
         t['CkanVersionException'] = CkanVersionException
+        t['HelperError'] = HelperError
+        t['enqueue_job'] = enqueue_job
 
         # check contents list correct
         errors = set(t).symmetric_difference(set(self.contents))
@@ -251,6 +325,9 @@ content type, cookies, etc.
     @classmethod
     def _add_served_directory(cls, config, relative_path, config_var):
         ''' Add extra public/template directories to config. '''
+        import inspect
+        import os
+
         assert config_var in ('extra_template_paths', 'extra_public_paths')
         # we want the filename that of the function caller but they will
         # have used one of the available helper functions
@@ -275,6 +352,9 @@ content type, cookies, etc.
         See :doc:`/theming/index` for more details.
 
         '''
+        import inspect
+        import os
+
         # we want the filename that of the function caller but they will
         # have used one of the available helper functions
         frame, filename, line_number, function_name, lines, index =\
@@ -286,9 +366,23 @@ content type, cookies, etc.
         ckan.lib.fanstatic_resources.create_library(name, absolute_path)
 
     @classmethod
+    def _add_ckan_admin_tabs(cls, config, route_name, tab_label,
+                             config_var='ckan.admin_tabs'):
+        '''
+        Update 'ckan.admin_tabs' dict the passed config dict.
+        '''
+        # get the admin_tabs dict from the config, or an empty dict.
+        admin_tabs_dict = config.get(config_var, {})
+        # update the admin_tabs dict with the new values
+        admin_tabs_dict.update({route_name: tab_label})
+        # update the config with the updated admin_tabs dict
+        config.update({config_var: admin_tabs_dict})
+
+    @classmethod
     def _version_str_2_list(cls, v_str):
         ''' convert a version string into a list of ints
         eg 1.6.1b --> [1, 6, 1] '''
+        import re
         v_str = re.sub(r'[^0-9.]', '', v_str)
         return [int(part) for part in v_str.split('.')]
 
@@ -347,13 +441,16 @@ content type, cookies, etc.
         :type max_version: string
 
         '''
+        from ckan.exceptions import CkanVersionException
         if not cls._check_ckan_version(min_version=min_version,
                                        max_version=max_version):
             if not max_version:
                 error = 'Requires ckan version %s or higher' % min_version
             else:
-                error = 'Requires ckan version between %s and %s' % \
-                            (min_version, max_version)
+                error = 'Requires ckan version between {0} and {1}'.format(
+                    min_version,
+                    max_version
+                )
             raise CkanVersionException(error)
 
     def __getattr__(self, name):
@@ -365,7 +462,7 @@ content type, cookies, etc.
         else:
             if name == '__bases__':
                 return self.__class__.__bases__
-            raise Exception('`%s` not found in plugins toolkit' % name)
+            raise AttributeError('`%s` not found in plugins toolkit' % name)
 
     def __dir__(self):
         if not self._toolkit:
@@ -373,5 +470,5 @@ content type, cookies, etc.
         return sorted(self._toolkit.keys())
 
 
-toolkit = _Toolkit()
-del _Toolkit
+# https://mail.python.org/pipermail/python-ideas/2012-May/014969.html
+sys.modules[__name__] = _Toolkit()

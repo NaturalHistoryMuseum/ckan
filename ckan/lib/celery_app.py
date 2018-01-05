@@ -1,15 +1,28 @@
-import ConfigParser
-import os
-import logging
+# encoding: utf-8
 
-from pylons import config as pylons_config
+'''
+Celery background tasks management.
+
+This module is DEPRECATED, use ``ckan.lib.jobs`` instead.
+'''
+
+import ConfigParser
+import logging
+import os
+
+from ckan.common import config as ckan_config
 from pkg_resources import iter_entry_points, VersionConflict
+
+from celery import __version__ as celery_version, Celery
+if not celery_version.startswith(u'3.'):
+    raise ImportError(u'Only Celery version 3.x is supported.')
+
 
 log = logging.getLogger(__name__)
 
-LIST_PARAMS = """CELERY_IMPORTS ADMINS ROUTES""".split()
+log.warning('ckan.lib.celery_app is deprecated, use ckan.lib.jobs instead.')
 
-from celery import Celery
+LIST_PARAMS = """CELERY_IMPORTS ADMINS ROUTES""".split()
 
 celery = Celery()
 
@@ -23,7 +36,7 @@ if not config_file:
 config.read(config_file)
 
 
-sqlalchemy_url = pylons_config.get('sqlalchemy.url')
+sqlalchemy_url = ckan_config.get('sqlalchemy.url')
 if not sqlalchemy_url:
     sqlalchemy_url = config.get('app:main', 'sqlalchemy.url')
 
@@ -50,10 +63,11 @@ for entry_point in iter_entry_points(group='ckan.celery_task'):
 
 try:
     for key, value in config.items('app:celery'):
+        key = key.upper()
         if key in LIST_PARAMS:
-            default_config[key.upper()] = value.split()
+            default_config.setdefault(key, []).extend(value.split())
         else:
-            default_config[key.upper()] = value
+            default_config[key] = value
 except ConfigParser.NoSectionError:
     pass
 

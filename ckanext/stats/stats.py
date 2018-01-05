@@ -1,7 +1,9 @@
+# encoding: utf-8
+
 import datetime
 
-from pylons import config
-from sqlalchemy import Table, select, func, and_
+from ckan.common import config
+from sqlalchemy import Table, select, join, func, and_
 
 import ckan.plugins as p
 import ckan.model as model
@@ -29,6 +31,7 @@ class Stats(object):
         package = table('package')
         rating = table('rating')
         sql = select([package.c.id, func.avg(rating.c.rating), func.count(rating.c.rating)], from_obj=[package.join(rating)]).\
+              where(and_(package.c.private==False, package.c.state=='active')). \
               group_by(package.c.id).\
               order_by(func.avg(rating.c.rating).desc(), func.count(rating.c.rating).desc()).\
               limit(limit)
@@ -39,7 +42,10 @@ class Stats(object):
     @classmethod
     def most_edited_packages(cls, limit=10):
         package_revision = table('package_revision')
-        s = select([package_revision.c.id, func.count(package_revision.c.revision_id)]).\
+        package = table('package')
+
+        s = select([package_revision.c.id, func.count(package_revision.c.revision_id)], from_obj=[package_revision.join(package)]).\
+            where(and_(package.c.private==False, package.c.state=='active', )).\
             group_by(package_revision.c.id).\
             order_by(func.count(package_revision.c.revision_id).desc()).\
             limit(limit)
@@ -50,9 +56,15 @@ class Stats(object):
     @classmethod
     def largest_groups(cls, limit=10):
         member = table('member')
+        package = table('package')
+
+        j = join(member, package,
+                 member.c.table_id == package.c.id)
+
         s = select([member.c.group_id, func.count(member.c.table_id)]).\
+            select_from(j).\
             group_by(member.c.group_id).\
-            where(and_(member.c.group_id!=None, member.c.table_name=='package')).\
+            where(and_(member.c.group_id!=None, member.c.table_name=='package', package.c.private==False, package.c.state=='active')).\
             order_by(func.count(member.c.table_id).desc()).\
             limit(limit)
 
@@ -65,15 +77,19 @@ class Stats(object):
         assert returned_tag_info in ('name', 'id', 'object')
         tag = table('tag')
         package_tag = table('package_tag')
-        #TODO filter out tags with state=deleted
+        package = table('package')
         if returned_tag_info == 'name':
             from_obj = [package_tag.join(tag)]
             tag_column = tag.c.name
         else:
             from_obj = None
             tag_column = package_tag.c.tag_id
+        j = join(package_tag, package,
+                 package_tag.c.package_id == package.c.id)
         s = select([tag_column, func.count(package_tag.c.package_id)],
-                    from_obj=from_obj)
+                    from_obj=from_obj).\
+            select_from(j).\
+            where(and_(package_tag.c.state=='active', package.c.private == False, package.c.state == 'active' ))
         s = s.group_by(tag_column).\
             order_by(func.count(package_tag.c.package_id).desc()).\
             limit(limit)
@@ -85,18 +101,20 @@ class Stats(object):
             return res_tags
 
     @classmethod
-    def top_package_owners(cls, limit=10):
-        package_role = table('package_role')
-        user_object_role = table('user_object_role')
-        s = select([user_object_role.c.user_id, func.count(user_object_role.c.role)], from_obj=[user_object_role.join(package_role)]).\
-            where(user_object_role.c.role==model.authz.Role.ADMIN).\
-            where(user_object_role.c.user_id!=None).\
-            group_by(user_object_role.c.user_id).\
-            order_by(func.count(user_object_role.c.role).desc()).\
-            limit(limit)
-        res_ids = model.Session.execute(s).fetchall()
-        res_users = [(model.Session.query(model.User).get(unicode(user_id)), val) for user_id, val in res_ids]
-        return res_users
+    def top_package_creators(cls, limit=10):
+        userid_count = \
+            model.Session.query(model.Package.creator_user_id,
+                                func.count(model.Package.creator_user_id))\
+                 .filter(model.Package.state == 'active')\
+                 .filter(model.Package.private == False)\
+                 .group_by(model.Package.creator_user_id) \
+                 .order_by(func.count(model.Package.creator_user_id).desc())\
+                 .limit(limit).all()
+        user_count = [
+            (model.Session.query(model.User).get(unicode(user_id)), count)
+            for user_id, count in userid_count
+            if user_id]
+        return user_count
 
 class RevisionStats(object):
     @classmethod

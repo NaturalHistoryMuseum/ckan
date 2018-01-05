@@ -1,23 +1,27 @@
+# encoding: utf-8
+
 import json
 import nose
+import urllib
 import pprint
 
-import pylons
 import sqlalchemy.orm as orm
 
 import ckan.plugins as p
 import ckan.lib.create_test_data as ctd
 import ckan.model as model
-import ckan.tests as tests
+import ckan.tests.legacy as tests
 
-import ckanext.datastore.db as db
+from ckan.common import config
+import ckanext.datastore.backend.postgres as db
 from ckanext.datastore.tests.helpers import extract, rebuild_all_dbs
 
-import ckan.new_tests.helpers as helpers
-import ckan.new_tests.factories as factories
+import ckan.tests.helpers as helpers
+import ckan.tests.factories as factories
 
 assert_equals = nose.tools.assert_equals
 assert_raises = nose.tools.assert_raises
+assert_in = nose.tools.assert_in
 
 
 class TestDatastoreSearchNewTest(object):
@@ -53,15 +57,68 @@ class TestDatastoreSearchNewTest(object):
         assert_equals(len(result['records']), 2)
         assert_equals(len(set(ranks)), 1)
 
+    def test_fts_works_on_non_textual_fields(self):
+        resource = factories.Resource()
+        data = {
+            'resource_id': resource['id'],
+            'force': True,
+            'records': [
+                {'from': 'Brazil', 'year': {'foo': 2014}},
+                {'from': 'Brazil', 'year': {'foo': 1986}}
+            ],
+        }
+        result = helpers.call_action('datastore_create', **data)
 
-class TestDatastoreSearch(tests.WsgiAppCase):
+        search_data = {
+            'resource_id': resource['id'],
+            'fields': 'year',
+            'plain': False,
+            'q': {
+                'year': '20:*'
+            },
+        }
+        result = helpers.call_action('datastore_search', **search_data)
+        assert_equals(len(result['records']), 1)
+        assert_equals(result['records'][0]['year'], {'foo': 2014})
+
+    def test_all_params_work_with_fields_with_whitespaces(self):
+        resource = factories.Resource()
+        data = {
+            'resource_id': resource['id'],
+            'force': True,
+            'records': [
+                {'the year': 2014},
+                {'the year': 2013},
+            ],
+        }
+        result = helpers.call_action('datastore_create', **data)
+        search_data = {
+            'resource_id': resource['id'],
+            'fields': 'the year',
+            'sort': 'the year',
+            'filters': {
+                'the year': 2013
+            },
+            'q': {
+                'the year': '2013'
+            },
+        }
+        result = helpers.call_action('datastore_search', **search_data)
+        result_years = [r['the year'] for r in result['records']]
+        assert_equals(result_years, [2013])
+
+
+
+class TestDatastoreSearch():
     sysadmin_user = None
     normal_user = None
 
     @classmethod
     def setup_class(cls):
+
         if not tests.is_datastore_supported():
             raise nose.SkipTest("Datastore not supported")
+        cls.app = helpers._get_test_app()
         p.load('datastore')
         ctd.CreateTestData.create()
         cls.sysadmin_user = model.User.get('testsysadmin')
@@ -113,9 +170,7 @@ class TestDatastoreSearch(tests.WsgiAppCase):
                                  u'characters': None,
                                  u'rating with %': u'99%'}]
 
-        engine = db._get_engine(
-                {'connection_url': pylons.config['ckan.datastore.write_url']}
-            )
+        engine = db.get_write_engine()
         cls.Session = orm.scoped_session(orm.sessionmaker(bind=engine))
 
     @classmethod
@@ -460,14 +515,13 @@ class TestDatastoreSearch(tests.WsgiAppCase):
         ) for record in result['records']]
         assert results == self.expected_records, result['records']
 
-        expected_fields = [{u'type': u'int4', u'id': u'_id'},
+        expected_fields = [{u'type': u'int', u'id': u'_id'},
                         {u'type': u'text', u'id': u'b\xfck'},
                         {u'type': u'text', u'id': u'author'},
                         {u'type': u'timestamp', u'id': u'published'},
-                        {u'type': u'json', u'id': u'nested'},
-                        {u'type': u'float4', u'id': u'rank'}]
+                        {u'type': u'json', u'id': u'nested'}]
         for field in expected_fields:
-            assert field in result['fields'], field
+            assert_in(field, result['fields'])
 
         # test multiple word queries (connected with and)
         data = {'resource_id': self.data['resource_id'],
@@ -596,11 +650,12 @@ class TestDatastoreSearch(tests.WsgiAppCase):
         assert res_dict['error'].get('fields') is not None, res_dict['error']
 
 
-class TestDatastoreFullTextSearch(tests.WsgiAppCase):
+class TestDatastoreFullTextSearch():
     @classmethod
     def setup_class(cls):
         if not tests.is_datastore_supported():
             raise nose.SkipTest("Datastore not supported")
+        cls.app = helpers._get_test_app()
         p.load('datastore')
         ctd.CreateTestData.create()
         cls.sysadmin_user = model.User.get('testsysadmin')
@@ -621,12 +676,12 @@ class TestDatastoreFullTextSearch(tests.WsgiAppCase):
               {'id': 'lon'}
             ],
             records=[
-              {'id': 0, 'date': '2011-01-01', 'x': 1, 'y': 2, 'z': 3, 'country': 'DE', 'title': 'first', 'lat':52.56, 'lon':13.40},
+              {'id': 0, 'date': '2011-01-01', 'x': 1, 'y': 2, 'z': 3, 'country': 'DE', 'title': 'first 99', 'lat':52.56, 'lon':13.40},
               {'id': 1, 'date': '2011-02-02', 'x': 2, 'y': 4, 'z': 24, 'country': 'UK', 'title': 'second', 'lat':54.97, 'lon':-1.60},
               {'id': 2, 'date': '2011-03-03', 'x': 3, 'y': 6, 'z': 9, 'country': 'US', 'title': 'third', 'lat':40.00, 'lon':-75.5},
               {'id': 3, 'date': '2011-04-04', 'x': 4, 'y': 8, 'z': 6, 'country': 'UK', 'title': 'fourth', 'lat':57.27, 'lon':-6.20},
               {'id': 4, 'date': '2011-05-04', 'x': 5, 'y': 10, 'z': 15, 'country': 'UK', 'title': 'fifth', 'lat':51.58, 'lon':0},
-              {'id': 5, 'date': '2011-06-02', 'x': 6, 'y': 12, 'z': 18, 'country': 'DE', 'title': 'sixth', 'lat':51.04, 'lon':7.9}
+              {'id': 5, 'date': '2011-06-02', 'x': 6, 'y': 12, 'z': 18, 'country': 'DE', 'title': 'sixth 53.56', 'lat':51.04, 'lon':7.9}
             ]
         )
         postparams = '%s=1' % json.dumps(cls.data)
@@ -662,8 +717,68 @@ class TestDatastoreFullTextSearch(tests.WsgiAppCase):
         res_dict = json.loads(res.body)
         assert res_dict['result']['total'] == 5, pprint.pformat(res_dict)
 
+    def test_full_text_search_on_integers_within_text_strings(self):
+        data = {'resource_id': self.data['resource_id'],
+                'q': '99'}
+        postparams = '%s=1' % json.dumps(data)
+        auth = {'Authorization': str(self.normal_user.apikey)}
+        res = self.app.post('/api/action/datastore_search', params=postparams,
+                            extra_environ=auth)
+        res_dict = json.loads(res.body)
+        assert res_dict['result']['total'] == 1, pprint.pformat(res_dict)
 
-class TestDatastoreSQL(tests.WsgiAppCase):
+    def test_full_text_search_on_integers(self):
+        data = {'resource_id': self.data['resource_id'],
+                'q': '4'}
+        postparams = '%s=1' % json.dumps(data)
+        auth = {'Authorization': str(self.normal_user.apikey)}
+        res = self.app.post('/api/action/datastore_search', params=postparams,
+                            extra_environ=auth)
+        res_dict = json.loads(res.body)
+        assert res_dict['result']['total'] == 3, pprint.pformat(res_dict)
+
+    def test_full_text_search_on_decimal_within_text_strings(self):
+        data = {'resource_id': self.data['resource_id'],
+                'q': '53.56'}
+        postparams = '%s=1' % json.dumps(data)
+        auth = {'Authorization': str(self.normal_user.apikey)}
+        res = self.app.post('/api/action/datastore_search', params=postparams,
+                            extra_environ=auth)
+        res_dict = json.loads(res.body)
+        assert res_dict['result']['total'] == 1, pprint.pformat(res_dict)
+
+    def test_full_text_search_on_decimal(self):
+        data = {'resource_id': self.data['resource_id'],
+                'q': '52.56'}
+        postparams = '%s=1' % json.dumps(data)
+        auth = {'Authorization': str(self.normal_user.apikey)}
+        res = self.app.post('/api/action/datastore_search', params=postparams,
+                            extra_environ=auth)
+        res_dict = json.loads(res.body)
+        assert res_dict['result']['total'] == 1, pprint.pformat(res_dict)
+
+    def test_full_text_search_on_date(self):
+        data = {'resource_id': self.data['resource_id'],
+                'q': '2011-01-01'}
+        postparams = '%s=1' % json.dumps(data)
+        auth = {'Authorization': str(self.normal_user.apikey)}
+        res = self.app.post('/api/action/datastore_search', params=postparams,
+                            extra_environ=auth)
+        res_dict = json.loads(res.body)
+        assert res_dict['result']['total'] == 1, pprint.pformat(res_dict)
+
+    def test_full_text_search_on_json_like_string_succeeds(self):
+        data = {'resource_id': self.data['resource_id'],
+                'q': '"{}"'}
+        postparams = '%s=1' % json.dumps(data)
+        auth = {'Authorization': str(self.normal_user.apikey)}
+        res = self.app.post('/api/action/datastore_search', params=postparams,
+                            extra_environ=auth)
+        res_dict = json.loads(res.body)
+        assert res_dict['success'], pprint.pformat(res_dict)
+
+
+class TestDatastoreSQL():
     sysadmin_user = None
     normal_user = None
 
@@ -671,6 +786,7 @@ class TestDatastoreSQL(tests.WsgiAppCase):
     def setup_class(cls):
         if not tests.is_datastore_supported():
             raise nose.SkipTest("Datastore not supported")
+        cls.app = helpers._get_test_app()
         plugin = p.load('datastore')
         if plugin.legacy_mode:
             # make sure we undo adding the plugin
@@ -709,13 +825,16 @@ class TestDatastoreSQL(tests.WsgiAppCase):
             name='test_org',
             apikey=cls.sysadmin_user.apikey)
 
-        cls.expected_records = [{u'_full_text': u"'annakarenina':1 'b':3 'moo':4 'tolstoy':2",
+        cls.expected_records = [{u'_full_text': [u"'annakarenina'", u"'b'",
+                                                 u"'moo'", u"'tolstoy'",
+                                                 u"'2005'"],
                                  u'_id': 1,
                                  u'author': u'tolstoy',
                                  u'b\xfck': u'annakarenina',
                                  u'nested': [u'b', {u'moo': u'moo'}],
                                  u'published': u'2005-03-01T00:00:00'},
-                                {u'_full_text': u"'b':3 'tolstoy':2 'warandpeac':1",
+                                {u'_full_text': [u"'tolstoy'", u"'warandpeac'",
+                                                 u"'b'"],
                                  u'_id': 2,
                                  u'author': u'tolstoy',
                                  u'b\xfck': u'warandpeace',
@@ -723,8 +842,7 @@ class TestDatastoreSQL(tests.WsgiAppCase):
                                  u'published': None}]
         cls.expected_join_results = [{u'first': 1, u'second': 1}, {u'first': 1, u'second': 2}]
 
-        engine = db._get_engine(
-            {'connection_url': pylons.config['ckan.datastore.write_url']})
+        engine = db.get_write_engine()
         cls.Session = orm.scoped_session(orm.sessionmaker(bind=engine))
 
     @classmethod
@@ -761,7 +879,16 @@ class TestDatastoreSQL(tests.WsgiAppCase):
         res_dict = json.loads(res.body)
         assert res_dict['success'] is True
         result = res_dict['result']
-        assert result['records'] == self.expected_records
+        assert len(result['records']) == len(self.expected_records)
+        for (row_index, row) in enumerate(result['records']):
+            expected_row = self.expected_records[row_index]
+            assert set(row.keys()) == set(expected_row.keys())
+            for field in row:
+                if field == '_full_text':
+                    for ft_value in expected_row['_full_text']:
+                        assert ft_value in row['_full_text']
+                else:
+                    assert row[field] == expected_row[field]
 
         # test alias search
         query = 'SELECT * FROM "{0}"'.format(self.data['aliases'])
@@ -783,7 +910,16 @@ class TestDatastoreSQL(tests.WsgiAppCase):
         res_dict = json.loads(res.body)
         assert res_dict['success'] is True
         result = res_dict['result']
-        assert result['records'] == self.expected_records
+        assert len(result['records']) == len(self.expected_records)
+        for (row_index, row) in enumerate(result['records']):
+            expected_row = self.expected_records[row_index]
+            assert set(row.keys()) == set(expected_row.keys())
+            for field in row:
+                if field == '_full_text':
+                    for ft_value in expected_row['_full_text']:
+                        assert ft_value in row['_full_text']
+                else:
+                    assert row[field] == expected_row[field]
 
     def test_self_join(self):
         query = '''
@@ -793,10 +929,9 @@ class TestDatastoreSQL(tests.WsgiAppCase):
             where a.author = b.author
             limit 2
             '''.format(self.data['resource_id'])
-        data = {'sql': query}
-        postparams = json.dumps(data)
+        data = urllib.urlencode({'sql': query})
         auth = {'Authorization': str(self.normal_user.apikey)}
-        res = self.app.post('/api/action/datastore_search_sql', params=postparams,
+        res = self.app.post('/api/action/datastore_search_sql', params=data,
                             extra_environ=auth)
         res_dict = json.loads(res.body)
         assert res_dict['success'] is True
@@ -808,8 +943,7 @@ class TestDatastoreSQL(tests.WsgiAppCase):
             'user': self.sysadmin_user.name,
             'model': model}
         data_dict = {
-            'resource_id': self.data['resource_id'],
-            'connection_url': pylons.config['ckan.datastore.write_url']}
+            'resource_id': self.data['resource_id']}
         p.toolkit.get_action('datastore_make_private')(context, data_dict)
         query = 'SELECT * FROM "{0}"'.format(self.data['resource_id'])
         data = {'sql': query}
@@ -945,3 +1079,23 @@ class TestDatastoreSQL(tests.WsgiAppCase):
                             extra_environ=auth)
         res_dict = json.loads(res.body)
         assert res_dict['success'] is True
+
+    def test_not_authorized_to_access_system_tables(self):
+        test_cases = [
+            'SELECT * FROM pg_roles',
+            'SELECT * FROM pg_catalog.pg_database',
+            'SELECT rolpassword FROM pg_roles',
+            '''SELECT p.rolpassword
+               FROM pg_roles p
+               JOIN "{0}" r
+               ON p.rolpassword = r.author'''.format(self.data['resource_id']),
+        ]
+        for query in test_cases:
+            data = {'sql': query.replace('\n', '')}
+            postparams = urllib.urlencode(data)
+            res = self.app.post('/api/action/datastore_search_sql',
+                                params=postparams,
+                                status=403)
+            res_dict = json.loads(res.body)
+            assert res_dict['success'] is False
+            assert res_dict['error']['__type'] == 'Authorization Error'

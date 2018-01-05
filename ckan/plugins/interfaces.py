@@ -1,42 +1,68 @@
-'''A collection of interfaces that CKAN plugins can implement to customize and
+# encoding: utf-8
+
+u'''A collection of interfaces that CKAN plugins can implement to customize and
 extend CKAN.
 
 '''
-__all__ = [
-    'Interface',
-    'IGenshiStreamFilter', 'IRoutes',
-    'IMapper', 'ISession',
-    'IMiddleware',
-    'IAuthFunctions',
-    'IDomainObjectModification', 'IGroupController',
-    'IOrganizationController',
-    'IPackageController', 'IPluginObserver',
-    'IConfigurable', 'IConfigurer',
-    'IActions', 'IResourceUrlChange', 'IDatasetForm',
-    'IResourcePreview',
-    'IResourceView',
-    'IResourceController',
-    'IGroupForm',
-    'ITagController',
-    'ITemplateHelpers',
-    'IFacets',
-    'IAuthenticator',
-]
-
 from inspect import isclass
 from pyutilib.component.core import Interface as _pca_Interface
 
+__all__ = [
+    u'Interface',
+    u'IRoutes',
+    u'IMapper',
+    u'ISession',
+    u'IMiddleware',
+    u'IAuthFunctions',
+    u'IDomainObjectModification',
+    u'IFeed',
+    u'IGroupController',
+    u'IOrganizationController',
+    u'IPackageController',
+    u'IPluginObserver',
+    u'IConfigurable',
+    u'IConfigurer',
+    u'IActions',
+    u'IResourceUrlChange',
+    u'IDatasetForm',
+    u'IValidators',
+    u'IResourcePreview',
+    u'IResourceView',
+    u'IResourceController',
+    u'IGroupForm',
+    u'ITagController',
+    u'ITemplateHelpers',
+    u'IFacets',
+    u'IAuthenticator',
+    u'ITranslation',
+    u'IUploader',
+    u'IBlueprint',
+    u'IPermissionLabels',
+    u'IForkObserver',
+]
+
 
 class Interface(_pca_Interface):
+    u'''Base class for custom interfaces.
+
+    Marker base class for extension point interfaces.  This class
+    is not intended to be instantiated.  Instead, the declaration
+    of subclasses of Interface are recorded, and these
+    classes are used to define extension points.
+    '''
 
     @classmethod
     def provided_by(cls, instance):
+        u'''Check that object is an instance of class that implements interface.
+        '''
         return cls.implemented_by(instance.__class__)
 
     @classmethod
     def implemented_by(cls, other):
+        u'''Check wheter class implements current interface.
+        '''
         if not isclass(other):
-            raise TypeError("Class expected", other)
+            raise TypeError(u'Class expected', other)
         try:
             return cls in other._implements
         except AttributeError:
@@ -44,66 +70,74 @@ class Interface(_pca_Interface):
 
 
 class IMiddleware(Interface):
-    '''Hook into Pylons middleware stack
+    u'''Hook into CKAN middleware stack
+
+    Note that methods on this interface will be called two times,
+    one for the Pylons stack and one for the Flask stack (eventually
+    there will be only the Flask stack).
     '''
     def make_middleware(self, app, config):
-        '''Return an app configured with this middleware
+        u'''Return an app configured with this middleware
+
+        When called on the Flask stack, this method will get the actual Flask
+        app so plugins wanting to install Flask extensions can do it like
+        this::
+
+            import ckan.plugins as p
+            from flask_mail import Mail
+
+            class MyPlugin(p.SingletonPlugin):
+
+                p.implements(p.I18nMiddleware)
+
+                def make_middleware(app, config):
+
+                    mail = Mail(app)
+
+                    return app
         '''
         return app
 
     def make_error_log_middleware(self, app, config):
-        '''Return an app configured with this error log middleware
+        u'''Return an app configured with this error log middleware
+
+        Note that both on the Flask and Pylons middleware stacks, this
+        method will receive a wrapped WSGI app, not the actual Flask or
+        Pylons app.
         '''
         return app
 
 
-class IGenshiStreamFilter(Interface):
-    '''
-    Hook into template rendering.
-    See ckan.lib.base.py:render
-    '''
-
-    def filter(self, stream):
-        """
-        Return a filtered Genshi stream.
-        Called when any page is rendered.
-
-        :param stream: Genshi stream of the current output document
-        :returns: filtered Genshi stream
-        """
-        return stream
-
-
 class IRoutes(Interface):
-    """
+    u'''
     Plugin into the setup of the routes map creation.
 
-    """
+    '''
     def before_map(self, map):
-        """
+        u'''
         Called before the routes map is generated. ``before_map`` is before any
         other mappings are created so can override all other mappings.
 
         :param map: Routes map object
         :returns: Modified version of the map object
-        """
+        '''
         return map
 
     def after_map(self, map):
-        """
+        u'''
         Called after routes map is set up. ``after_map`` can be used to
         add fall-back handlers.
 
         :param map: Routes map object
         :returns: Modified version of the map object
-        """
+        '''
         return map
 
 
 class IMapper(Interface):
-    """
+    u'''
     A subset of the SQLAlchemy mapper extension hooks.
-    See http://www.sqlalchemy.org/docs/05/reference/orm/interfaces.html#sqlalchemy.orm.interfaces.MapperExtension
+    See `sqlalchemy MapperExtension`_
 
     Example::
 
@@ -112,170 +146,313 @@ class IMapper(Interface):
         ...     implements(IMapper)
         ...
         ...     def after_update(self, mapper, connection, instance):
-        ...         log("Updated: %r", instance)
-    """
+        ...         log(u'Updated: %r', instance)
+
+    .. _sqlalchemy MapperExtension:\
+    http://docs.sqlalchemy.org/en/rel_0_9/orm/deprecated.html#sqlalchemy.orm.interfaces.MapperExtension
+    '''
 
     def before_insert(self, mapper, connection, instance):
-        """
+        u'''
         Receive an object instance before that instance is INSERTed into
         its table.
-        """
+        '''
 
     def before_update(self, mapper, connection, instance):
-        """
+        u'''
         Receive an object instance before that instance is UPDATEed.
-        """
+        '''
 
     def before_delete(self, mapper, connection, instance):
-        """
-        Receive an object instance before that instance is DELETEed.
-        """
+        u'''
+        Receive an object instance before that instance is PURGEd.
+        (whereas usually in ckan 'delete' means to change the state property to
+        deleted, so use before_update for that case.)
+        '''
 
     def after_insert(self, mapper, connection, instance):
-        """
+        u'''
         Receive an object instance after that instance is INSERTed.
-        """
+        '''
 
     def after_update(self, mapper, connection, instance):
-        """
+        u'''
         Receive an object instance after that instance is UPDATEed.
-        """
+        '''
 
     def after_delete(self, mapper, connection, instance):
-        """
-        Receive an object instance after that instance is DELETEed.
-        """
+        u'''
+        Receive an object instance after that instance is PURGEd.
+        (whereas usually in ckan 'delete' means to change the state property to
+        deleted, so use before_update for that case.)
+        '''
 
 
 class ISession(Interface):
-    """
+    u'''
     A subset of the SQLAlchemy session extension hooks.
-    """
+    '''
 
     def after_begin(self, session, transaction, connection):
-        """
+        u'''
         Execute after a transaction is begun on a connection
-        """
+        '''
 
     def before_flush(self, session, flush_context, instances):
-        """
+        u'''
         Execute before flush process has started.
-        """
+        '''
 
     def after_flush(self, session, flush_context):
-        """
+        u'''
         Execute after flush has completed, but before commit has been called.
-        """
+        '''
 
     def before_commit(self, session):
-        """
+        u'''
         Execute right before commit is called.
-        """
+        '''
 
     def after_commit(self, session):
-        """
+        u'''
         Execute after a commit has occured.
-        """
+        '''
 
     def after_rollback(self, session):
-        """
+        u'''
         Execute after a rollback has occured.
-        """
+        '''
 
 
 class IDomainObjectModification(Interface):
-    """
+    u'''
     Receives notification of new, changed and deleted datasets.
-    """
+    '''
 
     def notify(self, entity, operation):
+        u'''
+        Send a notification on entity modification.
+
+        :param entity: instance of module.Package.
+        :param operation: 'new', 'changed' or 'deleted'.
+        '''
+        pass
+
+    def notify_after_commit(self, entity, operation):
+        u'''
+        ** DEPRECATED **
+
+        Supposed to send a notification after entity modification, but it
+        doesn't work.
+
+        :param entity: instance of module.Package.
+        :param operation: 'new', 'changed' or 'deleted'.
+        '''
+        pass
+
+
+class IFeed(Interface):
+    """
+    Allows extension of the default Atom feeds
+    """
+
+    def get_feed_class(self):
+        """
+        Allows plugins to provide a custom class to generate feed items.
+
+        :returns: feed class
+        :rtype: type
+
+        The feed item generator's constructor is called as follows::
+
+            feed_class(
+                feed_title,        # Mandatory
+                feed_link,         # Mandatory
+                feed_description,  # Mandatory
+                language,          # Optional, always set to 'en'
+                author_name,       # Optional
+                author_link,       # Optional
+                feed_guid,         # Optional
+                feed_url,          # Optional
+                previous_page,     # Optional, url of previous page of feed
+                next_page,         # Optional, url of next page of feed
+                first_page,        # Optional, url of first page of feed
+                last_page,         # Optional, url of last page of feed
+            )
+
+        """
+
+        pass
+
+    def get_item_additional_fields(self, dataset_dict):
+        """
+        Allows plugins to set additional fields on a feed item.
+
+        :param dataset_dict: the dataset metadata
+        :type dataset_dict: dictionary
+        :returns: the fields to set
+        :rtype: dictionary
+        """
         pass
 
 
 class IResourceUrlChange(Interface):
-    """
+    u'''
     Receives notification of changed urls.
-    """
+    '''
 
     def notify(self, resource):
+        u'''
+        Give user a notify is resource url has changed.
+
+        :param resource, instance of model.Resource
+        '''
         pass
 
 
 class IResourceView(Interface):
-    '''Add custom data view for resource file-types.
+    u'''Add custom view renderings for different resource types.
 
     '''
     def info(self):
-        '''
-        Return configuration for the view. Info can return the following.
+        u'''
+        Returns a dictionary with configuration options for the view.
 
-        :param name: name of view type
-        :param title: title of view type (Optional)
-        :param schema: schema to validate extra view config (Optional)
-        :param icon: icon from
-            http://fortawesome.github.io/Font-Awesome/3.2.1/icons/
-            without the icon- prefix eg. compass (Optional).
-        :param iframed: should we iframe the view template before rendering.
-            If the styles or JavaScript clash with the main site theme this
-            should be set to true. Default is true. (Optional)
-        :param preview_enabled:
-            Says if the preview button appears for this resource. Some preview
-            types have their  previews integrated with the form.
-            Some preview types have their previews integrated with the form.
-            Default false (Optional)
-        :param full_page_edit:  Says if the edit form is the full page width
-            of the page. Default false (Optional)
+        The available keys are:
 
-        eg:
-            {'name': 'image',
-             'title': 'Image',
-             'schema': {'image_url': [ignore_empty, unicode]},
-             'icon': 'compass',
-             'iframed': false,
+        :param name: name of the view type. This should match the name of the
+            actual plugin (eg ``image_view`` or ``recline_view``).
+        :param title: title of the view type, will be displayed on the
+            frontend. This should be translatable (ie wrapped on
+            ``toolkit._('Title')``).
+        :param default_title: default title that will be used if the view is
+            created automatically (optional, defaults to 'View').
+        :param default_description: default description that will be used if
+            the view is created automatically (optional, defaults to '').
+        :param icon: icon for the view type. Should be one of the
+            `Font Awesome`_ types without the `fa fa-` prefix eg. `compass`
+            (optional, defaults to 'picture').
+        :param always_available: the view type should be always available when
+            creating new views regardless of the format of the resource
+            (optional, defaults to False).
+        :param iframed: the view template should be iframed before rendering.
+            You generally want this option to be True unless the view styles
+            and JavaScript don't clash with the main site theme (optional,
+            defaults to True).
+        :param preview_enabled: the preview button should appear on the edit
+            view form. Some view types have their previews integrated with the
+            form (optional, defaults to False).
+        :param full_page_edit: the edit form should take the full page width
+            of the page (optional, defaults to False).
+        :param schema: schema to validate extra configuration fields for the
+            view (optional). Schemas are defined as a dictionary, with the
+            keys being the field name and the values a list of validator
+            functions that will get applied to the field. For instance::
+
+                {
+                    'offset': [ignore_empty, natural_number_validator],
+                    'limit': [ignore_empty, natural_number_validator],
+                }
+
+        Example configuration object::
+
+            {'name': 'image_view',
+             'title': toolkit._('Image'),
+             'schema': {
+                'image_url': [ignore_empty, unicode]
+             },
+             'icon': 'picture-o',
+             'always_available': True,
+             'iframed': False,
              }
 
+        :returns: a dictionary with the view type configuration
+        :rtype: dict
+
+        .. _Font Awesome: http://fortawesome.github.io/Font-Awesome/3.2.1/icons
         '''
-        return {'name': self.__class__.__name__}
+        return {u'name': self.__class__.__name__}
 
     def can_view(self, data_dict):
-        '''Return info on whether the plugin can preview the resource.
-        The ``data_dict`` contains: ``resource`` and ``package``.
+        u'''
+        Returns whether the plugin can render a particular resource.
 
-        return ``True`` or ``False``.
+        The ``data_dict`` contains the following keys:
+
+        :param resource: dict of the resource fields
+        :param package: dict of the full parent dataset
+
+        :returns: True if the plugin can render a particular resource, False
+            otherwise
+        :rtype: bool
         '''
 
     def setup_template_variables(self, context, data_dict):
-        '''
-        Add variables to the ``data_dict`` that is passed to the
-        template being rendered.
-        Should return a new dict instead of updating the input ``data_dict``.
+        u'''
+        Adds variables to be passed to the template being rendered.
 
-        The ``data_dict`` contains: ``resource_view``, ``resource`` and
-        ``package``.
+        This should return a new dict instead of updating the input
+        ``data_dict``.
+
+        The ``data_dict`` contains the following keys:
+
+        :param resource_view: dict of the resource view being rendered
+        :param resource: dict of the parent resource fields
+        :param package: dict of the full parent dataset
+
+        :returns: a dictionary with the extra variables to pass
+        :rtype: dict
         '''
 
     def view_template(self, context, data_dict):
-        '''
+        u'''
         Returns a string representing the location of the template to be
-        rendered when the view is rendered.
+        rendered when the view is displayed
 
-        The ``data_dict`` contains: ``resource_view``, ``resource`` and
-        ``package``.
+        The path will be relative to the template directory you registered
+        using the :py:func:`~ckan.plugins.toolkit.add_template_directory`
+        on the :py:class:`~ckan.plugins.interfaces.IConfigurer.update_config`
+        method, for instance ``views/my_view.html``.
+
+        :param resource_view: dict of the resource view being rendered
+        :param resource: dict of the parent resource fields
+        :param package: dict of the full parent dataset
+
+        :returns: the location of the view template.
+        :rtype: string
         '''
 
     def form_template(self, context, data_dict):
-        '''
+        u'''
         Returns a string representing the location of the template to be
-        rendered for the read page.
+        rendered when the edit view form is displayed
 
-        The ``data_dict`` contains: ``resource_view``, ``resource`` and
-        ``package``.
+        The path will be relative to the template directory you registered
+        using the :py:func:`~ckan.plugins.toolkit.add_template_directory`
+        on the :py:class:`~ckan.plugins.interfaces.IConfigurer.update_config`
+        method, for instance ``views/my_view_form.html``.
+
+        :param resource_view: dict of the resource view being rendered
+        :param resource: dict of the parent resource fields
+        :param package: dict of the full parent dataset
+
+        :returns: the location of the edit view form template.
+        :rtype: string
         '''
+
 
 class IResourcePreview(Interface):
-    ''' For backwards compatibility with the old resource preview code. '''
+    u'''
+
+    .. warning:: This interface is deprecated, and is only kept for backwards
+        compatibility with the old resource preview code. Please
+        use :py:class:`~ckan.plugins.interfaces.IResourceView` for writing
+        custom view plugins.
+
+    '''
+
     def can_preview(self, data_dict):
-        '''Return info on whether the plugin can preview the resource.
+        u'''Return info on whether the plugin can preview the resource.
 
         This can be done in two ways:
 
@@ -283,14 +460,14 @@ class IResourcePreview(Interface):
 
         2. The new way is to return a dict with  three keys:
 
-           ``'can_preview'`` (``boolean``)
+           * ``can_preview`` (``boolean``)
              ``True`` if the extension can preview the resource.
 
-           ``'fixable'`` (``string``)
+           * ``fixable`` (``string``)
              A string explaining how preview for the resource could be enabled,
              for example if the ``resource_proxy`` plugin was enabled.
 
-           ``'quality'`` (``int``)
+           * ``quality`` (``int``)
              How good the preview is: ``1`` (poor), ``2`` (average) or
              ``3`` (good). When multiple preview extensions can preview the
              same resource, this is used to determine which extension will
@@ -308,7 +485,7 @@ class IResourcePreview(Interface):
         '''
 
     def setup_template_variables(self, context, data_dict):
-        '''
+        u'''
         Add variables to c just prior to the template being rendered.
         The ``data_dict`` contains the resource and the package.
 
@@ -316,21 +493,21 @@ class IResourcePreview(Interface):
         '''
 
     def preview_template(self, context, data_dict):
-        '''
+        u'''
         Returns a string representing the location of the template to be
         rendered for the read page.
         The ``data_dict`` contains the resource and the package.
         '''
 
 class ITagController(Interface):
-    '''
+    u'''
     Hook into the Tag controller. These will usually be called just before
     committing or returning the respective object, i.e. all validation,
     synchronization and authorization setup are complete.
 
     '''
     def before_view(self, tag_dict):
-        '''
+        u'''
         Extensions will recieve this before the tag gets displayed. The
         dictionary passed will be the one that gets sent to the template.
 
@@ -339,33 +516,35 @@ class ITagController(Interface):
 
 
 class IGroupController(Interface):
-    """
+    u'''
     Hook into the Group controller. These will
     usually be called just before committing or returning the
     respective object, i.e. all validation, synchronization
     and authorization setup are complete.
-    """
+    '''
 
     def read(self, entity):
+        u'''Called after IGroupController.before_view inside group_read.
+        '''
         pass
 
     def create(self, entity):
+        u'''Called after group had been created inside group_create.
+        '''
         pass
 
     def edit(self, entity):
-        pass
-
-    def authz_add_role(self, object_role):
-        pass
-
-    def authz_remove_role(self, object_role):
+        u'''Called after group had been updated inside group_update.
+        '''
         pass
 
     def delete(self, entity):
+        u'''Called before commit inside group_delete.
+        '''
         pass
 
     def before_view(self, pkg_dict):
-        '''
+        u'''
              Extensions will recieve this before the group gets
              displayed. The dictionary passed will be the one that gets
              sent to the template.
@@ -374,33 +553,36 @@ class IGroupController(Interface):
 
 
 class IOrganizationController(Interface):
-    """
+    u'''
     Hook into the Organization controller. These will
     usually be called just before committing or returning the
     respective object, i.e. all validation, synchronization
     and authorization setup are complete.
-    """
+    '''
 
     def read(self, entity):
+        u'''Called after IOrganizationController.before_view inside
+        organization_read.
+        '''
         pass
 
     def create(self, entity):
+        u'''Called after organization had been created inside organization_create.
+        '''
         pass
 
     def edit(self, entity):
-        pass
-
-    def authz_add_role(self, object_role):
-        pass
-
-    def authz_remove_role(self, object_role):
+        u'''Called after organization had been updated inside organization_update.
+        '''
         pass
 
     def delete(self, entity):
+        u'''Called before commit inside organization_delete.
+        '''
         pass
 
     def before_view(self, pkg_dict):
-        '''
+        u'''
              Extensions will recieve this before the organization gets
              displayed. The dictionary passed will be the one that gets
              sent to the template.
@@ -409,31 +591,33 @@ class IOrganizationController(Interface):
 
 
 class IPackageController(Interface):
-    """
+    u'''
     Hook into the package controller.
     (see IGroupController)
-    """
+    '''
 
     def read(self, entity):
+        u'''Called after IGroupController.before_view inside package_read.
+        '''
         pass
 
     def create(self, entity):
+        u'''Called after group had been created inside package_create.
+        '''
         pass
 
     def edit(self, entity):
-        pass
-
-    def authz_add_role(self, object_role):
-        pass
-
-    def authz_remove_role(self, object_role):
+        u'''Called after group had been updated inside package_update.
+        '''
         pass
 
     def delete(self, entity):
+        u'''Called before commit inside package_delete.
+        '''
         pass
 
     def after_create(self, context, pkg_dict):
-        '''
+        u'''
             Extensions will receive the validated data dict after the package
             has been created (Note that the create method will return a package
             domain object, which may not include all fields). Also the newly
@@ -442,7 +626,7 @@ class IPackageController(Interface):
         pass
 
     def after_update(self, context, pkg_dict):
-        '''
+        u'''
             Extensions will receive the validated data dict after the package
             has been updated (Note that the edit method will return a package
             domain object, which may not include all fields).
@@ -450,14 +634,14 @@ class IPackageController(Interface):
         pass
 
     def after_delete(self, context, pkg_dict):
-        '''
+        u'''
             Extensions will receive the data dict (tipically containing
             just the package id) after the package has been deleted.
         '''
         pass
 
     def after_show(self, context, pkg_dict):
-        '''
+        u'''
             Extensions will receive the validated data dict after the package
             is ready for display (Note that the read method will return a
             package domain object, which may not include all fields).
@@ -465,7 +649,7 @@ class IPackageController(Interface):
         pass
 
     def before_search(self, search_params):
-        '''
+        u'''
             Extensions will receive a dictionary with the query parameters,
             and should return a modified (or not) version of it.
 
@@ -477,7 +661,7 @@ class IPackageController(Interface):
         return search_params
 
     def after_search(self, search_results, search_params):
-        '''
+        u'''
             Extensions will receive the search results, as well as the search
             parameters, and should return a modified (or not) object with the
             same structure:
@@ -496,7 +680,7 @@ class IPackageController(Interface):
         return search_results
 
     def before_index(self, pkg_dict):
-        '''
+        u'''
              Extensions will receive what will be given to the solr for
              indexing. This is essentially a flattened dict (except for
              multli-valued fields such as tags) of all the terms sent to
@@ -506,7 +690,7 @@ class IPackageController(Interface):
         return pkg_dict
 
     def before_view(self, pkg_dict):
-        '''
+        u'''
              Extensions will recieve this before the dataset gets
              displayed. The dictionary passed will be the one that gets
              sent to the template.
@@ -515,93 +699,262 @@ class IPackageController(Interface):
 
 
 class IResourceController(Interface):
-    """
+    u'''
     Hook into the resource controller.
-    """
+    '''
+
+    def before_create(self, context, resource):
+        u'''
+        Extensions will receive this before a resource is created.
+
+        :param context: The context object of the current request, this
+            includes for example access to the ``model`` and the ``user``.
+        :type context: dictionary
+        :param resource: An object representing the resource to be added
+            to the dataset (the one that is about to be created).
+        :type resource: dictionary
+        '''
+        pass
+
+    def after_create(self, context, resource):
+        u'''
+        Extensions will receive this after a resource is created.
+
+        :param context: The context object of the current request, this
+            includes for example access to the ``model`` and the ``user``.
+        :type context: dictionary
+        :param resource: An object representing the latest resource added
+            to the dataset (the one that was just created). A key in the
+            resource dictionary worth mentioning is ``url_type`` which is
+            set to ``upload`` when the resource file is uploaded instead
+            of linked.
+        :type resource: dictionary
+        '''
+        pass
+
+    def before_update(self, context, current, resource):
+        u'''
+        Extensions will receive this before a resource is updated.
+
+        :param context: The context object of the current request, this
+            includes for example access to the ``model`` and the ``user``.
+        :type context: dictionary
+        :param current: The current resource which is about to be updated
+        :type current: dictionary
+        :param resource: An object representing the updated resource which
+            will replace the ``current`` one.
+        :type resource: dictionary
+        '''
+        pass
+
+    def after_update(self, context, resource):
+        u'''
+        Extensions will receive this after a resource is updated.
+
+        :param context: The context object of the current request, this
+            includes for example access to the ``model`` and the ``user``.
+        :type context: dictionary
+        :param resource: An object representing the updated resource in
+            the dataset (the one that was just updated). As with
+            ``after_create``, a noteworthy key in the resource dictionary
+            ``url_type`` which is set to ``upload`` when the resource file
+            is uploaded instead of linked.
+        :type resource: dictionary
+        '''
+        pass
+
+    def before_delete(self, context, resource, resources):
+        u'''
+        Extensions will receive this before a previously created resource is
+        deleted.
+
+        :param context: The context object of the current request, this
+            includes for example access to the ``model`` and the ``user``.
+        :type context: dictionary
+        :param resource: An object representing the resource that is about
+            to be deleted. This is a dictionary with one key: ``id`` which
+            holds the id ``string`` of the resource that should be deleted.
+        :type resource: dictionary
+        :param resources: The list of resources from which the resource will
+            be deleted (including the resource to be deleted if it existed
+            in the package).
+        :type resources: list
+        '''
+        pass
+
+    def after_delete(self, context, resources):
+        u'''
+        Extensions will receive this after a previously created resource is
+        deleted.
+
+        :param context: The context object of the current request, this
+            includes for example access to the ``model`` and the ``user``.
+        :type context: dictionary
+        :param resources: A list of objects representing the remaining
+            resources after a resource has been removed.
+        :type resource: list
+        '''
+        pass
 
     def before_show(self, resource_dict):
-        '''
-            Extensions will receive the validated data dict before the resource
-            is ready for display.
+        u'''
+        Extensions will receive the validated data dict before the resource
+        is ready for display.
+
+        Be aware that this method is not only called for UI display, but also
+        in other methods like when a resource is deleted because showing a
+        package is used to get access to the resources in a package.
         '''
         return resource_dict
 
 
 class IPluginObserver(Interface):
-    """
+    u'''
     Plugin to the plugin loading mechanism
-    """
+    '''
 
     def before_load(self, plugin):
-        """
+        u'''
         Called before a plugin is loaded
         This method is passed the plugin class.
-        """
+        '''
 
     def after_load(self, service):
-        """
+        u'''
         Called after a plugin has been loaded.
         This method is passed the instantiated service object.
-        """
+        '''
 
     def before_unload(self, plugin):
-        """
+        u'''
         Called before a plugin is loaded
         This method is passed the plugin class.
-        """
+        '''
 
     def after_unload(self, service):
-        """
+        u'''
         Called after a plugin has been unloaded.
         This method is passed the instantiated service object.
-        """
+        '''
 
 
 class IConfigurable(Interface):
-    """
-    Pass configuration to plugins and extensions
-    """
+    u'''
+    Initialization hook for plugins.
 
+    See also :py:class:`IConfigurer`.
+    '''
     def configure(self, config):
-        """
-        Called by load_environment
-        """
+        u'''
+        Called during CKAN's initialization.
+
+        This function allows plugins to initialize themselves during
+        CKAN's initialization. It is called after most of the
+        environment (e.g. the database) is already set up.
+
+        Note that this function is not only called during the
+        initialization of the main CKAN process but also during the
+        execution of paster commands and background jobs, since these
+        run in separate processes and are therefore initialized
+        independently.
+
+        :param config: dict-like configuration object
+        :type config: :py:class:`ckan.common.CKANConfig`
+        '''
 
 
 class IConfigurer(Interface):
-    """
-    Configure CKAN (pylons) environment via the ``pylons.config`` object
-    """
+    u'''
+    Configure CKAN environment via the ``config`` object
+
+    See also :py:class:`IConfigurable`.
+    '''
 
     def update_config(self, config):
-        """
+        u'''
         Called by load_environment at earliest point when config is
         available to plugins. The config should be updated in place.
 
-        :param config: ``pylons.config`` object
-        """
+        :param config: ``config`` object
+        '''
+
+    def update_config_schema(self, schema):
+        u'''
+        Return a schema with the runtime-editable config options
+
+        CKAN will use the returned schema to decide which configuration options
+        can be edited during runtime (using
+        :py:func:`ckan.logic.action.update.config_option_update`) and to
+        validate them before storing them.
+
+        Defaults to
+        :py:func:`ckan.logic.schema.default_update_configuration_schema`, which
+        will be passed to all extensions implementing this method, which can
+        add or remove runtime-editable config options to it.
+
+        :param schema: a dictionary mapping runtime-editable configuration
+          option keys to lists
+          of validator and converter functions to be applied to those keys
+        :type schema: dictionary
+
+        :returns: a dictionary mapping runtime-editable configuration option
+          keys to lists of
+          validator and converter functions to be applied to those keys
+        :rtype: dictionary
+        '''
+        return schema
 
 
 class IActions(Interface):
-    """
+    u'''
     Allow adding of actions to the logic layer.
-    """
+    '''
     def get_actions(self):
-        """
+        u'''
         Should return a dict, the keys being the name of the logic
         function and the values being the functions themselves.
 
         By decorating a function with the `ckan.logic.side_effect_free`
         decorator, the associated action will be made available by a GET
         request (as well as the usual POST request) through the action API.
-        """
+
+        By decrorating a function with the 'ckan.plugins.toolkit.chained_action,
+        the action will be chained to another function defined in plugins with a
+        "first plugin wins" pattern, which means the first plugin declaring a
+        chained action should be called first. Chained actions must be
+        defined as action_function(original_action, context, data_dict)
+        where the first parameter will be set to the action function in
+        the next plugin or in core ckan. The chained action may call the
+        original_action function, optionally passing different values,
+        handling exceptions, returning different values and/or raising
+        different exceptions to the caller.
+        '''
+
+
+class IValidators(Interface):
+    u'''
+    Add extra validators to be returned by
+    :py:func:`ckan.plugins.toolkit.get_validator`.
+    '''
+    def get_validators(self):
+        u'''Return the validator functions provided by this plugin.
+
+        Return a dictionary mapping validator names (strings) to
+        validator functions. For example::
+
+            {'valid_shoe_size': shoe_size_validator,
+             'valid_hair_color': hair_color_validator}
+
+        These validator functions would then be available when a
+        plugin calls :py:func:`ckan.plugins.toolkit.get_validator`.
+        '''
 
 
 class IAuthFunctions(Interface):
-    '''Override CKAN's authorization functions, or add new auth functions.'''
+    u'''Override CKAN's authorization functions, or add new auth functions.'''
 
     def get_auth_functions(self):
-        '''Return the authorization functions provided by this plugin.
+        u'''Return the authorization functions provided by this plugin.
 
         Return a dictionary mapping authorization function names (strings) to
         functions. For example::
@@ -668,7 +1021,7 @@ class IAuthFunctions(Interface):
 
 
 class ITemplateHelpers(Interface):
-    '''Add custom template helper functions.
+    u'''Add custom template helper functions.
 
     By implementing this plugin interface plugins can provide their own
     template helper functions, which custom templates can then access via the
@@ -678,7 +1031,7 @@ class ITemplateHelpers(Interface):
 
     '''
     def get_helpers(self):
-        '''Return a dict mapping names to helper functions.
+        u'''Return a dict mapping names to helper functions.
 
         The keys of the dict should be the names with which the helper
         functions will be made available to templates, and the values should be
@@ -693,7 +1046,7 @@ class ITemplateHelpers(Interface):
 
 
 class IDatasetForm(Interface):
-    '''Customize CKAN's dataset (package) schemas and forms.
+    u'''Customize CKAN's dataset (package) schemas and forms.
 
     By implementing this interface plugins can customise CKAN's dataset schema,
     for example to add new custom fields to datasets.
@@ -713,7 +1066,7 @@ class IDatasetForm(Interface):
 
     '''
     def package_types(self):
-        '''Return an iterable of package types that this plugin handles.
+        u'''Return an iterable of package types that this plugin handles.
 
         If a request involving a package of one of the returned types is made,
         then this plugin instance will be delegated to.
@@ -726,7 +1079,7 @@ class IDatasetForm(Interface):
         '''
 
     def is_fallback(self):
-        '''Return ``True`` if this plugin is the fallback plugin.
+        u'''Return ``True`` if this plugin is the fallback plugin.
 
         When no IDatasetForm plugin's ``package_types()`` match the ``type`` of
         the package being processed, the fallback plugin is delegated to
@@ -744,7 +1097,7 @@ class IDatasetForm(Interface):
         '''
 
     def create_package_schema(self):
-        '''Return the schema for validating new dataset dicts.
+        u'''Return the schema for validating new dataset dicts.
 
         CKAN will use the returned schema to validate and convert data coming
         from users (via the dataset form or API) when creating new datasets,
@@ -767,7 +1120,7 @@ class IDatasetForm(Interface):
         '''
 
     def update_package_schema(self):
-        '''Return the schema for validating updated dataset dicts.
+        u'''Return the schema for validating updated dataset dicts.
 
         CKAN will use the returned schema to validate and convert data coming
         from users (via the dataset form or API) when updating datasets, before
@@ -790,7 +1143,7 @@ class IDatasetForm(Interface):
         '''
 
     def show_package_schema(self):
-        '''
+        u'''
         Return a schema to validate datasets before they're shown to the user.
 
         CKAN will use the returned schema to validate and convert data coming
@@ -816,7 +1169,7 @@ class IDatasetForm(Interface):
         '''
 
     def setup_template_variables(self, context, data_dict):
-        '''Add variables to the template context for use in templates.
+        u'''Add variables to the template context for use in templates.
 
         This function is called before a dataset template is rendered. If you
         have custom dataset templates that require some additional variables,
@@ -827,7 +1180,7 @@ class IDatasetForm(Interface):
         '''
 
     def new_template(self):
-        '''Return the path to the template for the new dataset page.
+        u'''Return the path to the template for the new dataset page.
 
         The path should be relative to the plugin's templates dir, e.g.
         ``'package/new.html'``.
@@ -837,18 +1190,16 @@ class IDatasetForm(Interface):
         '''
 
     def read_template(self):
-        '''Return the path to the template for the dataset read page.
+        u'''Return the path to the template for the dataset read page.
 
         The path should be relative to the plugin's templates dir, e.g.
         ``'package/read.html'``.
 
-        If the user requests the dataset in a format other than HTML
-        (CKAN supports returning datasets in RDF or N3 format by appending .rdf
-        or .n3 to the dataset read URL, see
-        :doc:`/maintaining/linked-data-and-rdf`) then CKAN will try to render a
-        template file with the same path as returned by this function, but a
-        different filename extension, e.g. ``'package/read.rdf'``.  If your
-        extension doesn't have this RDF version of the template file, the user
+        If the user requests the dataset in a format other than HTML, then
+        CKAN will try to render a template file with the same path as returned
+        by this function, but a different filename extension,
+        e.g. ``'package/read.rdf'``.  If your extension (or another one)
+        does not provide this version of the template file, the user
         will get a 404 error.
 
         :rtype: string
@@ -856,7 +1207,7 @@ class IDatasetForm(Interface):
         '''
 
     def edit_template(self):
-        '''Return the path to the template for the dataset edit page.
+        u'''Return the path to the template for the dataset edit page.
 
         The path should be relative to the plugin's templates dir, e.g.
         ``'package/edit.html'``.
@@ -866,7 +1217,7 @@ class IDatasetForm(Interface):
         '''
 
     def search_template(self):
-        '''Return the path to the template for use in the dataset search page.
+        u'''Return the path to the template for use in the dataset search page.
 
         This template is used to render each dataset that is listed in the
         search results on the dataset search page.
@@ -879,7 +1230,7 @@ class IDatasetForm(Interface):
         '''
 
     def history_template(self):
-        '''Return the path to the template for the dataset history page.
+        u'''Return the path to the template for the dataset history page.
 
         The path should be relative to the plugin's templates dir, e.g.
         ``'package/history.html'``.
@@ -888,8 +1239,18 @@ class IDatasetForm(Interface):
 
         '''
 
+    def resource_template(self):
+        u'''Return the path to the template for the resource read page.
+
+        The path should be relative to the plugin's templates dir, e.g.
+        ``'package/resource_read.html'``.
+
+        :rtype: string
+
+        '''
+
     def package_form(self):
-        '''Return the path to the template for the dataset form.
+        u'''Return the path to the template for the dataset form.
 
         The path should be relative to the plugin's templates dir, e.g.
         ``'package/form.html'``.
@@ -898,8 +1259,17 @@ class IDatasetForm(Interface):
 
         '''
 
+    def resource_form(self):
+        u'''Return the path to the template for the resource form.
+
+        The path should be relative to the plugin's templates dir, e.g.
+        ``'package/snippets/resource_form.html'``
+
+        :rtype: string
+        '''
+
     def validate(self, context, data_dict, schema, action):
-        """Customize validation of datasets.
+        u'''Customize validation of datasets.
 
         When this method is implemented it is used to perform all validation
         for these datasets. The default implementation calls and returns the
@@ -927,130 +1297,142 @@ class IDatasetForm(Interface):
           dataset and errors is a dictionary with keys matching data_dict
           and lists-of-string-error-messages as values
         :rtype: (dictionary, dictionary)
-        """
+        '''
 
 
 class IGroupForm(Interface):
-    """
+    u'''
     Allows customisation of the group controller as a plugin.
 
     The behaviour of the plugin is determined by 5 method hooks:
 
-     - package_form(self)
+     - group_form(self)
      - form_to_db_schema(self)
      - db_to_form_schema(self)
      - check_data_dict(self, data_dict)
      - setup_template_variables(self, context, data_dict)
 
     Furthermore, there can be many implementations of this plugin registered
-    at once.  With each instance associating itself with 0 or more package
-    type strings.  When a package controller action is invoked, the package
+    at once.  With each instance associating itself with 0 or more group
+    type strings.  When a group controller action is invoked, the group
     type determines which of the registered plugins to delegate to.  Each
     implementation must implement two methods which are used to determine the
-    package-type -> plugin mapping:
+    group-type -> plugin mapping:
 
      - is_fallback(self)
-     - package_types(self)
+     - group_types(self)
+     - group_controller(self)
 
     Implementations might want to consider mixing in
     ckan.lib.plugins.DefaultGroupForm which provides
     default behaviours for the 5 method hooks.
 
-    """
+    '''
 
     ##### These methods control when the plugin is delegated to          #####
 
     def is_fallback(self):
-        """
-        Returns true iff this provides the fallback behaviour, when no other
-        plugin instance matches a package's type.
+        u'''
+        Returns true if this provides the fallback behaviour, when no other
+        plugin instance matches a group's type.
 
         There must be exactly one fallback controller defined, any attempt to
         register more than one will throw an exception at startup.  If there's
         no fallback registered at startup the
         ckan.lib.plugins.DefaultGroupForm used as the fallback.
-        """
+        '''
 
     def group_types(self):
-        """
+        u'''
         Returns an iterable of group type strings.
 
-        If a request involving a package of one of those types is made, then
+        If a request involving a group of one of those types is made, then
         this plugin instance will be delegated to.
 
         There must only be one plugin registered to each group type.  Any
         attempts to register more than one plugin instance to a given group
         type will raise an exception at startup.
-        """
+        '''
+
+    def group_controller(self):
+        u'''
+        Returns the name of the group controller.
+
+        The group controller is the controller, that is used to handle requests
+        of the group type(s) of this plugin.
+
+        If this method is not provided, the default group controller is used
+        (`group`).
+        '''
 
     ##### End of control methods
 
-    ##### Hooks for customising the PackageController's behaviour        #####
+    ##### Hooks for customising the GroupController's behaviour          #####
     ##### TODO: flesh out the docstrings a little more.                  #####
     def new_template(self):
-        """
+        u'''
         Returns a string representing the location of the template to be
         rendered for the 'new' page. Uses the default_group_type configuration
         option to determine which plugin to use the template from.
-        """
+        '''
 
     def index_template(self):
-        """
+        u'''
         Returns a string representing the location of the template to be
         rendered for the index page. Uses the default_group_type configuration
         option to determine which plugin to use the template from.
-        """
+        '''
 
     def read_template(self):
-        """
+        u'''
         Returns a string representing the location of the template to be
         rendered for the read page
-        """
+        '''
 
     def history_template(self):
-        """
+        u'''
         Returns a string representing the location of the template to be
         rendered for the history page
-        """
+        '''
 
     def edit_template(self):
-        """
+        u'''
         Returns a string representing the location of the template to be
         rendered for the edit page
-        """
+        '''
 
-    def package_form(self):
-        """
+    def group_form(self):
+        u'''
         Returns a string representing the location of the template to be
-        rendered.  e.g. "group/new_group_form.html".
-        """
+        rendered.  e.g. ``group/new_group_form.html``.
+        '''
 
     def form_to_db_schema(self):
-        """
+        u'''
         Returns the schema for mapping group data from a form to a format
         suitable for the database.
-        """
+        '''
 
     def db_to_form_schema(self):
-        """
+        u'''
         Returns the schema for mapping group data from the database into a
         format suitable for the form (optional)
-        """
+        '''
 
     def check_data_dict(self, data_dict):
-        """
+        u'''
         Check if the return data is correct.
 
         raise a DataError if not.
-        """
+        '''
 
     def setup_template_variables(self, context, data_dict):
-        """
+        u'''
         Add variables to c just prior to the template being rendered.
-        """
+        '''
 
     def validate(self, context, data_dict, schema, action):
-        """Customize validation of groups.
+        u'''Customize validation of groups.
 
         When this method is implemented it is used to perform all validation
         for these groups. The default implementation calls and returns the
@@ -1079,12 +1461,12 @@ class IGroupForm(Interface):
           group and errors is a dictionary with keys matching data_dict
           and lists-of-string-error-messages as values
         :rtype: (dictionary, dictionary)
-        """
+        '''
 
     ##### End of hooks                                                   #####
 
 class IFacets(Interface):
-    '''Customize the search facets shown on search pages.
+    u'''Customize the search facets shown on search pages.
 
     By implementing this interface plugins can customize the search facets that
     are displayed for filtering search results on the dataset search page,
@@ -1125,7 +1507,7 @@ class IFacets(Interface):
 
     '''
     def dataset_facets(self, facets_dict, package_type):
-        '''Modify and return the ``facets_dict`` for the dataset search page.
+        u'''Modify and return the ``facets_dict`` for the dataset search page.
 
         The ``package_type`` is the type of package that these facets apply to.
         Plugins can provide different search facets for different types of
@@ -1144,7 +1526,7 @@ class IFacets(Interface):
         return facets_dict
 
     def group_facets(self, facets_dict, group_type, package_type):
-        '''Modify and return the ``facets_dict`` for a group's page.
+        u'''Modify and return the ``facets_dict`` for a group's page.
 
         The ``package_type`` is the type of package that these facets apply to.
         Plugins can provide different search facets for different types of
@@ -1170,7 +1552,7 @@ class IFacets(Interface):
         return facets_dict
 
     def organization_facets(self, facets_dict, organization_type, package_type):
-        '''Modify and return the ``facets_dict`` for an organization's page.
+        u'''Modify and return the ``facets_dict`` for an organization's page.
 
         The ``package_type`` is the type of package that these facets apply to.
         Plugins can provide different search facets for different types of
@@ -1199,16 +1581,12 @@ class IFacets(Interface):
 
 
 class IAuthenticator(Interface):
-    '''EXPERIMENTAL
-
-    Allows custom authentication methods to be integrated into CKAN.
-    Currently it is experimental and the interface may change.'''
-
+    u'''Allows custom authentication methods to be integrated into CKAN.'''
 
     def identify(self):
-        '''called to identify the user.
+        u'''called to identify the user.
 
-        If the user is identfied then it should set
+        If the user is identified then it should set
         c.user: The id of the user
         c.userobj: The actual user object (this may be removed as a
         requirement in a later release so that access to the model is not
@@ -1216,12 +1594,172 @@ class IAuthenticator(Interface):
         '''
 
     def login(self):
-        '''called at login.'''
+        u'''called at login.'''
 
     def logout(self):
-        '''called at logout.'''
+        u'''called at logout.'''
 
     def abort(self, status_code, detail, headers, comment):
-        '''called on abort.  This allows aborts due to authorization issues
+        u'''called on abort.  This allows aborts due to authorization issues
         to be overriden'''
         return (status_code, detail, headers, comment)
+
+
+class ITranslation(Interface):
+    u'''
+    Allows extensions to provide their own translation strings.
+    '''
+    def i18n_directory(self):
+        u'''Change the directory of the .mo translation files'''
+
+    def i18n_locales(self):
+        u'''Change the list of locales that this plugin handles '''
+
+    def i18n_domain(self):
+        u'''Change the gettext domain handled by this plugin'''
+
+
+class IUploader(Interface):
+    u'''
+    Extensions implementing this interface can provide custom uploaders to
+    upload resources and group images.
+    '''
+
+    def get_uploader(self, upload_to, old_filename):
+        u'''Return an uploader object to upload general files that must
+        implement the following methods:
+
+        ``__init__(upload_to, old_filename=None)``
+
+        Set up the uploader.
+
+        :param upload_to: name of the subdirectory within the storage
+            directory to upload the file
+        :type upload_to: string
+
+        :param old_filename: name of an existing image asset, so the extension
+            can replace it if necessary
+        :type old_filename: string
+
+        ``update_data_dict(data_dict, url_field, file_field, clear_field)``
+
+        Allow the data_dict to be manipulated before it reaches any
+        validators.
+
+        :param data_dict: data_dict to be updated
+        :type data_dict: dictionary
+
+        :param url_field: name of the field where the upload is going to be
+        :type url_field: string
+
+        :param file_field: name of the key where the FieldStorage is kept (i.e
+            the field where the file data actually is).
+        :type file_field: string
+
+        :param clear_field: name of a boolean field which requests the upload
+            to be deleted.
+        :type clear_field: string
+
+        ``upload(max_size)``
+
+        Perform the actual upload.
+
+        :param max_size: upload size can be limited by this value in MBs.
+        :type max_size: int
+
+        '''
+
+    def get_resource_uploader(self):
+        u'''Return an uploader object used to upload resource files that must
+        implement the following methods:
+
+        ``__init__(resource)``
+
+        Set up the resource uploader.
+
+        :param resource: resource dict
+        :type resource: dictionary
+
+        Optionally, this method can set the following two attributes
+        on the class instance so they are set in the resource object:
+
+            filesize (int):  Uploaded file filesize.
+            mimetype (str):  Uploaded file mimetype.
+
+        ``upload(id, max_size)``
+
+        Perform the actual upload.
+
+        :param id: resource id, can be used to create filepath
+        :type id: string
+
+        :param max_size: upload size can be limited by this value in MBs.
+        :type max_size: int
+
+        ``get_path(id)``
+
+        Required by the ``resource_download`` action to determine the path to
+        the file.
+
+        :param id: resource id
+        :type id: string
+
+        '''
+
+
+class IBlueprint(Interface):
+
+    u'''Register an extension as a Flask Blueprint.'''
+
+    def get_blueprint(self):
+        u'''Return a Flask Blueprint object to be registered by the app.'''
+
+
+class IPermissionLabels(Interface):
+    u'''
+    Extensions implementing this interface can override the permission
+    labels applied to datasets to precisely control which datasets are
+    visible to each user.
+
+    Implementations might want to consider mixing in
+    ``ckan.lib.plugins.DefaultPermissionLabels`` which provides
+    default behaviours for these methods.
+
+    See ``ckanext/example_ipermissionlabels`` for an example plugin.
+    '''
+
+    def get_dataset_labels(self, dataset_obj):
+        u'''
+        Return a list of unicode strings to be stored in the search index
+        as the permission lables for a dataset dict.
+
+        :param dataset_obj: dataset details
+        :type dataset_obj: Package model object
+
+        :returns: permission labels
+        :rtype: list of unicode strings
+        '''
+
+    def get_user_dataset_labels(self, user_obj):
+        u'''
+        Return the permission labels that give a user permission to view
+        a dataset. If any of the labels returned from this method match
+        any of the labels returned from :py:meth:`.get_dataset_labels`
+        then this user is permitted to view that dataset.
+
+        :param user_obj: user details
+        :type user_obj: User model object or None
+
+        :returns: permission labels
+        :rtype: list of unicode strings
+        '''
+
+
+class IForkObserver(Interface):
+    u'''
+    Observe forks of the CKAN process.
+    '''
+    def before_fork(self):
+        u'''
+        Called shortly before the CKAN process is forked.
+        '''

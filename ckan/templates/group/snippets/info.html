@@ -10,7 +10,12 @@
     </div>
     {% endblock %}
     {% block heading %}
-    <h1 class="heading">{{ group.display_name }}</h1>
+    <h1 class="heading">
+      {{ group.display_name }}
+      {% if group.state == 'deleted' %}
+        [{{ _('Deleted') }}]
+      {% endif %}
+    </h1>
     {% endblock %}
     {% block description %}
     {% if group.description %}
@@ -25,11 +30,11 @@
       <div class="nums">
         <dl>
           <dt>{{ _('Followers') }}</dt>
-          <dd>{{ h.SI_number_span(group.num_followers) }}</dd>
+          <dd data-module="followers-counter" data-module-id="{{ group.id }}" data-module-num_followers="{{ group.num_followers }}">{{ h.SI_number_span(group.num_followers) }}</dd>
         </dl>
         <dl>
           <dt>{{ _('Datasets') }}</dt>
-          <dd>{{ h.SI_number_span(group.packages|length) }}</dd>
+          <dd>{{ h.SI_number_span(group.package_count) }}</dd>
         </dl>
       </div>
       {% endblock %}

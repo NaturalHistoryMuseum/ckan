@@ -1,13 +1,20 @@
+# encoding: utf-8
+
 import os
 import cgi
-import pylons
 import datetime
-import ckan.lib.munge as munge
 import logging
+import magic
+import mimetypes
+
+from werkzeug.datastructures import FileStorage as FlaskFileStorage
+
+import ckan.lib.munge as munge
 import ckan.logic as logic
+import ckan.plugins as plugins
+from ckan.common import config
 
-
-config = pylons.config
+ALLOWED_UPLOAD_TYPES = (cgi.FieldStorage, FlaskFileStorage)
 log = logging.getLogger(__name__)
 
 _storage_path = None
@@ -15,11 +22,44 @@ _max_resource_size = None
 _max_image_size = None
 
 
+def _get_underlying_file(wrapper):
+    if isinstance(wrapper, FlaskFileStorage):
+        return wrapper.stream
+    return wrapper.file
+
+
+def get_uploader(upload_to, old_filename=None):
+    '''Query IUploader plugins and return an uploader instance for general
+    files.'''
+    upload = None
+    for plugin in plugins.PluginImplementations(plugins.IUploader):
+        upload = plugin.get_uploader(upload_to, old_filename)
+
+    # default uploader
+    if upload is None:
+        upload = Upload(upload_to, old_filename)
+
+    return upload
+
+
+def get_resource_uploader(data_dict):
+    '''Query IUploader plugins and return a resource uploader instance.'''
+    upload = None
+    for plugin in plugins.PluginImplementations(plugins.IUploader):
+        upload = plugin.get_resource_uploader(data_dict)
+
+    # default uploader
+    if upload is None:
+        upload = ResourceUpload(data_dict)
+
+    return upload
+
+
 def get_storage_path():
     '''Function to cache storage path'''
     global _storage_path
 
-    #None means it has not been set. False means not in config.
+    # None means it has not been set. False means not in config.
     if _storage_path is None:
         storage_path = config.get('ckan.storage_path')
         ofs_impl = config.get('ofs.impl')
@@ -27,8 +67,8 @@ def get_storage_path():
         if storage_path:
             _storage_path = storage_path
         elif ofs_impl == 'pairtree' and ofs_storage_dir:
-            log.warn('''Please use config option ckan.storage_path instaed of
-                     ofs.storage_path''')
+            log.warn('''Please use config option ckan.storage_path instead of
+                     ofs.storage_dir''')
             _storage_path = ofs_storage_dir
             return _storage_path
         elif ofs_impl:
@@ -60,7 +100,7 @@ def get_max_resource_size():
 
 class Upload(object):
     def __init__(self, object_type, old_filename=None):
-        ''' Setup upload by creating  a subdirectory of the storage directory
+        ''' Setup upload by creating a subdirectory of the storage directory
         of name object_type. old_filename is the name of the file in the url
         field last time'''
 
@@ -75,7 +115,7 @@ class Upload(object):
         try:
             os.makedirs(self.storage_path)
         except OSError, e:
-            ## errno 17 is file already exists
+            # errno 17 is file already exists
             if e.errno != 17:
                 raise
         self.object_type = object_type
@@ -99,15 +139,15 @@ class Upload(object):
         if not self.storage_path:
             return
 
-        if isinstance(self.upload_field_storage, cgi.FieldStorage):
+        if isinstance(self.upload_field_storage, (ALLOWED_UPLOAD_TYPES)):
             self.filename = self.upload_field_storage.filename
             self.filename = str(datetime.datetime.utcnow()) + self.filename
-            self.filename = munge.munge_filename(self.filename)
+            self.filename = munge.munge_filename_legacy(self.filename)
             self.filepath = os.path.join(self.storage_path, self.filename)
             data_dict[url_field] = self.filename
-            self.upload_file = self.upload_field_storage.file
+            self.upload_file = _get_underlying_file(self.upload_field_storage)
             self.tmp_filepath = self.filepath + '~'
-        ### keep the file if there has been no change
+        # keep the file if there has been no change
         elif self.old_filename and not self.old_filename.startswith('http'):
             if not self.clear:
                 data_dict[url_field] = self.old_filename
@@ -127,7 +167,7 @@ class Upload(object):
             current_size = 0
             while True:
                 current_size = current_size + 1
-                # MB chuncks
+                # MB chunks
                 data = self.upload_file.read(2 ** 20)
                 if not data:
                     break
@@ -145,13 +185,15 @@ class Upload(object):
                 and not self.old_filename.startswith('http')):
             try:
                 os.remove(self.old_filepath)
-            except OSError, e:
+            except OSError:
                 pass
 
 
 class ResourceUpload(object):
     def __init__(self, resource):
         path = get_storage_path()
+        config_mimetype_guess = config.get('ckan.mimetype_guess', 'file_ext')
+
         if not path:
             self.storage_path = None
             return
@@ -159,21 +201,47 @@ class ResourceUpload(object):
         try:
             os.makedirs(self.storage_path)
         except OSError, e:
-            ## errno 17 is file already exists
+            # errno 17 is file already exists
             if e.errno != 17:
                 raise
         self.filename = None
+        self.mimetype = None
 
         url = resource.get('url')
+
         upload_field_storage = resource.pop('upload', None)
         self.clear = resource.pop('clear_upload', None)
 
-        if isinstance(upload_field_storage, cgi.FieldStorage):
+        if config_mimetype_guess == 'file_ext':
+            self.mimetype = mimetypes.guess_type(url)[0]
+
+        if isinstance(upload_field_storage, ALLOWED_UPLOAD_TYPES):
+            self.filesize = 0  # bytes
+
             self.filename = upload_field_storage.filename
             self.filename = munge.munge_filename(self.filename)
             resource['url'] = self.filename
             resource['url_type'] = 'upload'
-            self.upload_file = upload_field_storage.file
+            resource['last_modified'] = datetime.datetime.utcnow()
+            self.upload_file = _get_underlying_file(upload_field_storage)
+            self.upload_file.seek(0, os.SEEK_END)
+            self.filesize = self.upload_file.tell()
+            # go back to the beginning of the file buffer
+            self.upload_file.seek(0, os.SEEK_SET)
+
+            # check if the mimetype failed from guessing with the url
+            if not self.mimetype and config_mimetype_guess == 'file_ext':
+                self.mimetype = mimetypes.guess_type(self.filename)[0]
+
+            if not self.mimetype and config_mimetype_guess == 'file_contents':
+                try:
+                    self.mimetype = magic.from_buffer(self.upload_file.read(),
+                                                      mime=True)
+                    self.upload_file.seek(0, os.SEEK_SET)
+                except IOError, e:
+                    # Not that important if call above fails
+                    self.mimetype = None
+
         elif self.clear:
             resource['url_type'] = ''
 
@@ -188,15 +256,32 @@ class ResourceUpload(object):
         return filepath
 
     def upload(self, id, max_size=10):
+        '''Actually upload the file.
+
+        :returns: ``'file uploaded'`` if a new file was successfully uploaded
+            (whether it overwrote a previously uploaded file or not),
+            ``'file deleted'`` if an existing uploaded file was deleted,
+            or ``None`` if nothing changed
+        :rtype: ``string`` or ``None``
+
+        '''
         if not self.storage_path:
             return
+
+        # Get directory and filepath on the system
+        # where the file for this resource will be stored
         directory = self.get_directory(id)
         filepath = self.get_path(id)
+
+        # If a filename has been provided (a file is being uploaded)
+        # we write it to the filepath (and overwrite it if it already
+        # exists). This way the uploaded file will always be stored
+        # in the same location
         if self.filename:
             try:
                 os.makedirs(directory)
             except OSError, e:
-                ## errno 17 is file already exists
+                # errno 17 is file already exists
                 if e.errno != 17:
                     raise
             tmp_filepath = filepath + '~'
@@ -205,8 +290,9 @@ class ResourceUpload(object):
             current_size = 0
             while True:
                 current_size = current_size + 1
-                #MB chunks
+                # MB chunks
                 data = self.upload_file.read(2 ** 20)
+
                 if not data:
                     break
                 output_file.write(data)
@@ -215,9 +301,16 @@ class ResourceUpload(object):
                     raise logic.ValidationError(
                         {'upload': ['File upload too large']}
                     )
+
             output_file.close()
             os.rename(tmp_filepath, filepath)
+            return
 
+        # The resource form only sets self.clear (via the input clear_upload)
+        # to True when an uploaded file is not replaced by another uploaded
+        # file, only if it is replaced by a link to file.
+        # If the uploaded file is replaced by a link, we should remove the
+        # previously uploaded file to clean up the file system.
         if self.clear:
             try:
                 os.remove(filepath)

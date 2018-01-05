@@ -1,12 +1,15 @@
+# encoding: utf-8
+
 import functools
 import logging
 import re
 import sys
+from collections import defaultdict
 
 import formencode.validators
 
 import ckan.model as model
-import ckan.new_authz as new_authz
+import ckan.authz as authz
 import ckan.lib.navl.dictization_functions as df
 import ckan.plugins as p
 
@@ -16,27 +19,22 @@ log = logging.getLogger(__name__)
 _validate = df.validate
 
 
-class AttributeDict(dict):
-    def __getattr__(self, name):
-        try:
-            return self[name]
-        except KeyError:
-            raise AttributeError('No such attribute %r' % name)
+class NameConflict(Exception):
+    pass
 
-    def __setattr__(self, name, value):
-        raise AttributeError(
-            'You cannot set attributes of this object directly'
-        )
+
+class UsernamePasswordError(Exception):
+    pass
 
 
 class ActionError(Exception):
-    def __init__(self, extra_msg=None):
-        self.extra_msg = extra_msg
+
+    def __init__(self, message=''):
+        self.message = message
+        super(ActionError, self).__init__(message)
 
     def __str__(self):
-        err_msgs = (super(ActionError, self).__str__(),
-                    self.extra_msg)
-        return ' - '.join([str(err_msg) for err_msg in err_msgs if err_msg])
+        return self.message
 
 
 class NotFound(ActionError):
@@ -56,7 +54,6 @@ class NotAuthorized(ActionError):
     For example :py:func:`~ckan.logic.action.create.package_create` raises
     :py:exc:`~ckan.plugins.toolkit.NotAuthorized` if the user is not authorized
     to create packages.
-
     '''
     pass
 
@@ -76,11 +73,12 @@ class ValidationError(ActionError):
                 try:
                     tag_errors.append(', '.join(error['name']))
                 except KeyError:
-                    pass
+                    # e.g. if it is a vocabulary_id error
+                    tag_errors.append(error)
             error_dict['tags'] = tag_errors
         self.error_dict = error_dict
         self._error_summary = error_summary
-        self.extra_msg = extra_msg
+        super(ValidationError, self).__init__(extra_msg)
 
     @property
     def error_summary(self):
@@ -94,11 +92,17 @@ class ValidationError(ActionError):
                 return _(field_name.replace('_', ' '))
 
             summary = {}
+
             for key, error in error_dict.iteritems():
                 if key == 'resources':
                     summary[_('Resources')] = _('Package resource(s) invalid')
                 elif key == 'extras':
-                    summary[_('Extras')] = _('Missing Value')
+                    errors_extras = []
+                    for item in error:
+                        if (item.get('key') and
+                                item['key'][0] not in errors_extras):
+                            errors_extras.append(item.get('key')[0])
+                    summary[_('Extras')] = ', '.join(errors_extras)
                 elif key == 'extras_validation':
                     summary[_('Extras')] = error[0]
                 elif key == 'tags':
@@ -116,6 +120,7 @@ class ValidationError(ActionError):
                     self.error_dict)
         return ' - '.join([str(err_msg) for err_msg in err_msgs if err_msg])
 
+
 log = logging.getLogger(__name__)
 
 
@@ -127,7 +132,13 @@ def parse_params(params, ignore_keys=None):
     for key in params:
         if ignore_keys and key in ignore_keys:
             continue
-        value = params.getall(key)
+        # flask request has `getlist` instead of pylons' `getall`
+
+        if hasattr(params, 'getall'):
+            value = params.getall(key)
+        else:
+            value = params.getlist(key)
+
         # Blank values become ''
         if not value:
             value = ''
@@ -216,7 +227,10 @@ def _prepopulate_context(context):
     context.setdefault('model', model)
     context.setdefault('session', model.Session)
     try:
-        context.setdefault('user', c.user or c.author)
+        context.setdefault('user', c.user)
+    except AttributeError:
+        # c.user not set
+        pass
     except TypeError:
         # c not registered
         pass
@@ -270,31 +284,48 @@ def check_access(action, context, data_dict=None):
         context['__auth_audit'].pop()
 
     user = context.get('user')
-    log.debug('check access - user %r, action %s' % (user, action))
 
-    if not 'auth_user_obj' in context:
-        context['auth_user_obj'] = None
+    try:
+        if 'auth_user_obj' not in context:
+            context['auth_user_obj'] = None
 
-    if not context.get('ignore_auth'):
-        if not context.get('__auth_user_obj_checked'):
-            if context.get('user') and not context.get('auth_user_obj'):
-                context['auth_user_obj'] = model.User.by_name(context['user'])
-            context['__auth_user_obj_checked'] = True
+        if not context.get('ignore_auth'):
+            if not context.get('__auth_user_obj_checked'):
+                if context.get('user') and not context.get('auth_user_obj'):
+                    context['auth_user_obj'] = \
+                        model.User.by_name(context['user'])
+                context['__auth_user_obj_checked'] = True
 
-    context = _prepopulate_context(context)
+        context = _prepopulate_context(context)
 
-    logic_authorization = new_authz.is_authorized(action, context, data_dict)
-    if not logic_authorization['success']:
-        msg = logic_authorization.get('msg', '')
-        raise NotAuthorized(msg)
+        logic_authorization = authz.is_authorized(action, context,
+                                                  data_dict)
+        if not logic_authorization['success']:
+            msg = logic_authorization.get('msg', '')
+            raise NotAuthorized(msg)
+    except NotAuthorized, e:
+        log.debug(u'check access NotAuthorized - %s user=%s "%s"',
+                  action, user, unicode(e))
+        raise
 
-    log.debug('Access OK.')
+    log.debug('check access OK - %s user=%s', action, user)
     return True
 
 
 _actions = {}
+
+
 def clear_actions_cache():
     _actions.clear()
+
+
+def chained_action(func):
+    func.chained_action = True
+    return func
+
+
+def _is_chained_action(func):
+    return getattr(func, 'chained_action', False)
 
 
 def get_action(action):
@@ -321,7 +352,7 @@ def get_action(action):
     As the context parameter passed to an action function is commonly::
 
         context = {'model': ckan.model, 'session': ckan.model.Session,
-                   'user': pylons.c.user or pylons.c.author}
+                   'user': pylons.c.user}
 
     an action function returned by ``get_action()`` will automatically add
     these parameters to the context if they are not defined.  This is
@@ -331,6 +362,12 @@ def get_action(action):
 
     If a ``context`` of ``None`` is passed to the action function then the
     default context dict will be created.
+
+    .. note::
+
+        Many action functions modify the context dict. It can therefore
+        not be reused for multiple calls of the same or different action
+        functions.
 
     :param action: name of the action function to return,
         eg. ``'package_create'``
@@ -342,7 +379,7 @@ def get_action(action):
     '''
 
     if _actions:
-        if not action in _actions:
+        if action not in _actions:
             raise KeyError("Action '%s' not found" % action)
         return _actions.get(action)
     # Otherwise look in all the plugins to resolve all possible
@@ -350,7 +387,7 @@ def get_action(action):
     # Rather than writing them out in full will use __import__
     # to load anything from ckan.logic.action that looks like it might
     # be an action
-    for action_module_name in ['get', 'create', 'update', 'delete']:
+    for action_module_name in ['get', 'create', 'update', 'delete', 'patch']:
         module_path = 'ckan.logic.action.' + action_module_name
         module = __import__(module_path)
         for part in module_path.split('.')[1:]:
@@ -359,9 +396,9 @@ def get_action(action):
             if not k.startswith('_'):
                 # Only load functions from the action module or already
                 # replaced functions.
-                if (hasattr(v, '__call__')
-                        and (v.__module__ == module_path
-                             or hasattr(v, '__replaced'))):
+                if (hasattr(v, '__call__') and
+                        (v.__module__ == module_path or
+                         hasattr(v, '__replaced'))):
                     _actions[k] = v
 
                     # Whitelist all actions defined in logic/action/get.py as
@@ -370,25 +407,35 @@ def get_action(action):
                        not hasattr(v, 'side_effect_free'):
                         v.side_effect_free = True
 
-
     # Then overwrite them with any specific ones in the plugins:
     resolved_action_plugins = {}
     fetched_actions = {}
+    chained_actions = defaultdict(list)
     for plugin in p.PluginImplementations(p.IActions):
         for name, auth_function in plugin.get_actions().items():
-            if name in resolved_action_plugins:
-                raise Exception(
+            if _is_chained_action(auth_function):
+                chained_actions[name].append(auth_function)
+            elif name in resolved_action_plugins:
+                raise NameConflict(
                     'The action %r is already implemented in %r' % (
                         name,
                         resolved_action_plugins[name]
                     )
                 )
-            log.debug('Action function {0} from plugin {1} was inserted'.format(name, plugin.name))
-            resolved_action_plugins[name] = plugin.name
-            # Extensions are exempted from the auth audit for now
-            # This needs to be resolved later
-            auth_function.auth_audit_exempt = True
-            fetched_actions[name] = auth_function
+            else:
+                resolved_action_plugins[name] = plugin.name
+                # Extensions are exempted from the auth audit for now
+                # This needs to be resolved later
+                auth_function.auth_audit_exempt = True
+                fetched_actions[name] = auth_function
+    for name, func_list in chained_actions.iteritems():
+        if name not in fetched_actions:
+            raise NotFound('The action %r is not found for chained action' % (
+                name))
+        for func in reversed(func_list):
+            prev_func = fetched_actions[name]
+            fetched_actions[name] = functools.partial(func, prev_func)
+
     # Use the updated ones in preference to the originals.
     _actions.update(fetched_actions)
 
@@ -402,11 +449,13 @@ def get_action(action):
 
                 context = _prepopulate_context(context)
 
-                # Auth Auditing
-                # store this action name in the auth audit so we can see if
-                # check access was called on the function we store the id of
-                # the action incase the action is wrapped inside an action
-                # of the same name.  this happens in the datastore
+                # Auth Auditing - checks that the action function did call
+                # check_access (unless there is no accompanying auth function).
+                # We push the action name and id onto the __auth_audit stack
+                # before calling the action, and check_access removes it.
+                # (We need the id of the action in case the action is wrapped
+                # inside an action of the same name, which happens in the
+                # datastore)
                 context.setdefault('__auth_audit', [])
                 context['__auth_audit'].append((action_name, id(_action)))
 
@@ -415,11 +464,12 @@ def get_action(action):
                 try:
                     audit = context['__auth_audit'][-1]
                     if audit[0] == action_name and audit[1] == id(_action):
-                        if action_name not in new_authz.auth_functions_list():
+                        if action_name not in authz.auth_functions_list():
                             log.debug('No auth function for %s' % action_name)
                         elif not getattr(_action, 'auth_audit_exempt', False):
                             raise Exception(
-                                'Action function {0} did not call its auth function'
+                                'Action function {0} did not call its '
+                                'auth function'
                                 .format(action_name))
                         # remove from audit stack
                         context['__auth_audit'].pop()
@@ -483,6 +533,7 @@ def get_or_bust(data_dict, keys):
         return values[0]
     return tuple(values)
 
+
 def validate(schema_func, can_skip_validator=False):
     ''' A decorator that validates an action function against a given schema
     '''
@@ -500,6 +551,7 @@ def validate(schema_func, can_skip_validator=False):
             return action(context, data_dict)
         return wrapper
     return action_decorator
+
 
 def side_effect_free(action):
     '''A decorator that marks the given action function as side-effect-free.
@@ -562,6 +614,7 @@ def auth_audit_exempt(action):
     wrapper.auth_audit_exempt = True
     return wrapper
 
+
 def auth_allow_anonymous_access(action):
     ''' Flag an auth function as not requiring a logged in user
 
@@ -576,6 +629,7 @@ def auth_allow_anonymous_access(action):
     wrapper.auth_allow_anonymous_access = True
     return wrapper
 
+
 def auth_disallow_anonymous_access(action):
     ''' Flag an auth function as requiring a logged in user
 
@@ -589,6 +643,7 @@ def auth_disallow_anonymous_access(action):
     wrapper.auth_allow_anonymous_access = False
     return wrapper
 
+
 class UnknownValidator(Exception):
     '''Exception raised when a requested validator function cannot be found.
 
@@ -597,6 +652,7 @@ class UnknownValidator(Exception):
 
 
 _validators_cache = {}
+
 
 def clear_validators_cache():
     _validators_cache.clear()
@@ -618,58 +674,29 @@ def get_validator(validator):
     :rtype: ``types.FunctionType``
 
     '''
-    if  not _validators_cache:
+    if not _validators_cache:
         validators = _import_module_functions('ckan.lib.navl.validators')
         _validators_cache.update(validators)
         validators = _import_module_functions('ckan.logic.validators')
         _validators_cache.update(validators)
         _validators_cache.update({'OneOf': formencode.validators.OneOf})
+        converters = _import_module_functions('ckan.logic.converters')
+        _validators_cache.update(converters)
+
+        for plugin in reversed(list(p.PluginImplementations(p.IValidators))):
+            for name, fn in plugin.get_validators().items():
+                log.debug('Validator function {0} from plugin {1} was inserted'
+                          .format(name, plugin.name))
+                _validators_cache[name] = fn
     try:
         return _validators_cache[validator]
     except KeyError:
         raise UnknownValidator('Validator `%s` does not exist' % validator)
 
 
-class UnknownConverter(Exception):
-    '''Exception raised when a requested converter function cannot be found.
-
-    '''
-    pass
-
-
-_converters_cache = {}
-
-def clear_converters_cache():
-    _converters_cache.clear()
-
-
-# This function exists mainly so that converters can be made available to
-# extensions via ckan.plugins.toolkit.
-def get_converter(converter):
-    '''Return a converter function by name.
-
-    :param converter: the name of the converter function to return,
-        eg. ``'convert_to_extras'``
-    :type converter: string
-
-    :raises: :py:exc:`~ckan.plugins.toolkit.UnknownConverter` if the named
-        converter is not found
-
-    :returns: the named converter function
-    :rtype: ``types.FunctionType``
-
-    '''
-    if not _converters_cache:
-        converters = _import_module_functions('ckan.logic.converters')
-        _converters_cache.update(converters)
-    try:
-        return _converters_cache[converter]
-    except KeyError:
-        raise UnknownConverter('Converter `%s` does not exist' % converter)
-
-
 def model_name_to_class(model_module, model_name):
-    '''Return the class in model_module that has the same name as the received string.
+    '''Return the class in model_module that has the same name as the
+    received string.
 
     Raises AttributeError if there's no model in model_module named model_name.
     '''
@@ -678,6 +705,7 @@ def model_name_to_class(model_module, model_name):
         return getattr(model_module, model_class_name)
     except AttributeError:
         raise ValidationError("%s isn't a valid model" % model_class_name)
+
 
 def _import_module_functions(module_path):
     '''Import a module and get the functions and return them in a dict'''

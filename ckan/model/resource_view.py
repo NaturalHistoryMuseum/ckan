@@ -1,3 +1,5 @@
+# encoding: utf-8
+
 import sqlalchemy as sa
 
 import meta
@@ -24,8 +26,12 @@ class ResourceView(domain_object.DomainObject):
     @classmethod
     def get(cls, reference):
         '''Returns a ResourceView object referenced by its id.'''
-        query = meta.Session.query(cls).filter(cls.id == reference)
-        return query.first()
+        if not reference:
+            return None
+
+        view = meta.Session.query(cls).get(reference)
+
+        return view
 
     @classmethod
     def get_columns(cls):
@@ -46,6 +52,16 @@ class ResourceView(domain_object.DomainObject):
         '''Delete the Resource Views not in the received view types list'''
         query = meta.Session.query(ResourceView) \
                     .filter(sa.not_(ResourceView.view_type.in_(view_types)))
+
+        return query.delete(synchronize_session='fetch')
+
+    @classmethod
+    def delete_all(cls, view_types=[]):
+        '''Delete all Resource Views, or all of a particular type'''
+        query = meta.Session.query(ResourceView)
+
+        if view_types:
+            query = query.filter(ResourceView.view_type.in_(view_types))
 
         return query.delete(synchronize_session='fetch')
 

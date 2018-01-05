@@ -1,7 +1,10 @@
+# encoding: utf-8
+
 import datetime
 from sqlalchemy.orm import class_mapper
 import sqlalchemy
-from pylons import config
+from ckan.common import config
+from ckan.model.core import State
 
 try:
     RowProxy = sqlalchemy.engine.result.RowProxy
@@ -43,6 +46,8 @@ def table_dictize(obj, context, **kw):
             result_dict[name] = value
         elif isinstance(value, int):
             result_dict[name] = value
+        elif isinstance(value, long):
+            result_dict[name] = value
         elif isinstance(value, datetime.datetime):
             result_dict[name] = value.isoformat()
         elif isinstance(value, list):
@@ -53,7 +58,7 @@ def table_dictize(obj, context, **kw):
     result_dict.update(kw)
 
     ##HACK For optimisation to get metadata_modified created faster.
-    
+
     context['metadata_modified'] = max(result_dict.get('revision_timestamp', ''),
                                        context.get('metadata_modified', ''))
 
@@ -72,7 +77,7 @@ def obj_list_dictize(obj_list, context, sort_key=lambda x:x):
             dictized = table_dictize(obj, context, capacity=capacity)
         else:
             dictized = table_dictize(obj, context)
-        if active and obj.state not in ('active', 'pending'):
+        if active and obj.state != 'active':
             continue
         result_list.append(dictized)
 
@@ -115,20 +120,22 @@ def table_dict_save(table_dict, ModelClass, context):
 
     obj = None
 
-    unique_constriants = get_unique_constraints(table, context)
-
     id = table_dict.get("id")
 
     if id:
         obj = session.query(ModelClass).get(id)
 
     if not obj:
-        unique_constriants = get_unique_constraints(table, context)
-        for constraint in unique_constriants:
+        unique_constraints = get_unique_constraints(table, context)
+        for constraint in unique_constraints:
             params = dict((key, table_dict.get(key)) for key in constraint)
             obj = session.query(ModelClass).filter_by(**params).first()
             if obj:
-                break
+                if 'name' in params and getattr(obj, 'state', None) == State.DELETED:
+                    obj.name = obj.id
+                    obj = None
+                else:
+                    break
 
     if not obj:
         obj = ModelClass()
@@ -137,13 +144,6 @@ def table_dict_save(table_dict, ModelClass, context):
         if isinstance(value, list):
             continue
         setattr(obj, key, value)
-
-    if context.get('pending'):
-        if session.is_modified(obj, include_collections=False, passive=True):
-            if table_dict.get('state', '') == 'deleted':
-                obj.state = 'pending-deleted'
-            else:
-                obj.state = 'pending'
 
     session.add(obj)
 

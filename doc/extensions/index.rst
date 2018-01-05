@@ -31,10 +31,12 @@ features by developing your own CKAN extensions.
 
    tutorial
    custom-config-settings
+   remote-config-update
    testing-extensions
    best-practices
    adding-custom-fields
    plugin-interfaces
    plugins-toolkit
-   converters
    validators
+   translating-extensions
+   flask-migration

@@ -1,15 +1,67 @@
-===================
-Config File Options
-===================
+=====================
+Configuration Options
+=====================
 
-You can set many important options in the CKAN config file. By default, the
-configuration file is located at ``/etc/ckan/development.ini`` or
-``/etc/ckan/production.ini``. This section documents all of the config file
+The functionality and features of CKAN can be modified using many different
+configuration options. These are generally set in the `CKAN configuration file`_,
+but some of them can also be set via `Environment variables`_ or at :ref:`runtime <runtime-config>`.
+
+
+
+Environment variables
+*********************
+
+Some of the CKAN configuration options can be defined as `Environment variables`_
+on the server operating system.
+
+These are generally low-level critical settings needed when setting up the application, like the database
+connection, the Solr server URL, etc. Sometimes it can be useful to define them as environment variables to
+automate and orchestrate deployments without having to first modify the `CKAN configuration file`_.
+
+These options are only read at startup time to update the ``config`` object used by CKAN,
+but they won't be accessed any more during the lifetime of the application.
+
+CKAN environment variables names match the options in the configuration file, but they are always uppercase
+and prefixed with `CKAN_` (this prefix is added even if
+the corresponding option in the ini file does not have it), and replacing dots with underscores.
+
+This is the list of currently supported environment variables, please refer to the entries in the
+`CKAN configuration file`_ section below for more details about each one:
+
+.. literalinclude:: /../ckan/config/environment.py
+    :language: python
+    :start-after: Start CONFIG_FROM_ENV_VARS
+    :end-before: End CONFIG_FROM_ENV_VARS
+
+.. _Environment variables: http://en.wikipedia.org/wiki/Environment_variable
+
+
+.. _runtime-config:
+
+Updating configuration options during runtime
+*********************************************
+
+CKAN configuration options are generally defined before starting the web application (either in the
+`CKAN configuration file`_ or via `Environment variables`_).
+
+A limited number of configuration options can also be edited during runtime. This can be done on the
+:ref:`administration interface <admin page>` or using the :py:func:`~ckan.logic.action.update.config_option_update`
+API action. Only :doc:`sysadmins </sysadmin-guide>` can edit these runtime-editable configuration options. Changes made to these configuration options will be stored on the database and persisted when the server is restarted.
+
+Extensions can add (or remove) configuration options to the ones that can be edited at runtime. For more
+details on how to this check :doc:`/extensions/remote-config-update`.
+
+
+
+.. _config_file:
+
+CKAN configuration file
+***********************
+
+By default, the
+configuration file is located at ``/etc/ckan/default/development.ini`` or
+``/etc/ckan/default/production.ini``. This section documents all of the config file
 settings, for reference.
-
-.. todo::
-
-   Insert cross-ref to section about location of config file?
 
 .. note:: After editing your config file, you need to restart your webserver
    for the changes to take effect.
@@ -37,7 +89,6 @@ settings, for reference.
    If the same option is set more than once in your config file, the last
    setting given in the file will override the others.
 
-
 General Settings
 ----------------
 
@@ -58,6 +109,52 @@ files, and enables CKAN templates' debugging features.
 .. warning:: This option should be set to ``False`` for a public site.
    With debug mode enabled, a visitor to your site could execute malicious
    commands.
+
+
+Repoze.who Settings
+-------------------
+
+.. _who.timeout:
+
+who.timeout
+^^^^^^^^^^^
+
+Example::
+
+ who.timeout = 3600
+
+Default value: None
+
+This defines how long (in seconds) until a user is logged out after a period
+of inactivity. If the setting isn't defined, the session doesn't expire. Not
+active by default.
+
+.. _who.httponly:
+
+who.httponly
+^^^^^^^^^^^^
+
+Default value: True
+
+This determines whether the HttpOnly flag will be set on the repoze.who
+authorization cookie. The default in the absence of the setting is ``True``.
+For enhanced security it is recommended to use the HttpOnly flag and not set
+this to ``False``, unless you have a good reason for doing so.
+
+.. _who.secure:
+
+who.secure
+^^^^^^^^^^
+
+Example::
+
+ who.secure = True
+
+Default value: False
+
+This determines whether the secure flag will be set for the repoze.who
+authorization cookie. If ``True``, the cookie will be sent over HTTPS. The
+default in the absence of the setting is ``False``.
 
 
 Database Settings
@@ -108,6 +205,23 @@ with read permissions only. The format is the same as in :ref:`sqlalchemy.url`.
 
 .. end_config-datastore-urls
 
+.. _ckan.datastore.sqlalchemy:
+
+ckan.datastore.sqlalchemy.*
+^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+Example::
+
+ ckan.datastore.sqlalchemy.pool_size=10
+ ckan.datastore.sqlalchemy.max_overflow=20
+
+Custom sqlalchemy config parameters used to establish the DataStore
+database connection.
+
+To get the list of all the available properties check the `SQLAlchemy documentation`_
+
+.. _SQLAlchemy documentation: http://docs.sqlalchemy.org/en/rel_0_9/core/engines.html#engine-creation-api
+
 .. _ckan.datastore.default_fts_lang:
 
 ckan.datastore.default_fts_lang
@@ -117,12 +231,44 @@ Example::
 
  ckan.datastore.default_fts_lang = english
 
+Default value: ``english``
+
 This can be ignored if you're not using the :doc:`datastore`.
 
 The default language used when creating full-text search indexes and querying
-them. If this value isn't set, it'll default to "english". It can be
-overwritten by the user by passing the "lang" parameter to "datastore_search"
-and "datastore_create".
+them. It can be overwritten by the user by passing the "lang" parameter to
+"datastore_search" and "datastore_create".
+
+.. _ckan.datastore.default_fts_index_method:
+
+ckan.datastore.default_fts_index_method
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+Example::
+
+ ckan.datastore.default_fts_index_method = gist
+
+Default value:  ``gist``
+
+This can be ignored if you're not using the :doc:`datastore`.
+
+The default method used when creating full-text search indexes. Currently it
+can be "gin" or "gist". Refer to PostgreSQL's documentation to understand the
+characteristics of each one and pick the best for your instance.
+
+.. _ckan.datastore.sqlsearch.enabled:
+
+ckan.datastore.sqlsearch.enabled
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+Example::
+
+ ckan.datastore.sqlsearch.enabled = False
+
+Default value:  ``True``
+
+This option allows you to disable the datastore_search_sql action function, and
+corresponding API endpoint if you do not wish it to be activated.
 
 Site Settings
 -------------
@@ -136,14 +282,23 @@ Example::
 
   ckan.site_url = http://scotdata.ckan.net
 
-Default value:  (none)
+Default value:  (an explicit value is mandatory)
 
-The URL of your CKAN site. Many CKAN features that need an absolute URL to your
+Set this to the URL of your CKAN site. Many CKAN features that need an absolute URL to your
 site use this setting.
+
+This setting should only contain the protocol (e.g. ``http://``), host (e.g.
+``www.example.com``) and (optionally) the port (e.g. ``:8080``). In particular,
+if you have mounted CKAN at a path other than ``/`` then the mount point must
+*not* be included in ``ckan.site_url``. Instead, you need to set
+:ref:`ckan.root_path`.
+
+.. important:: It is mandatory to complete this setting
 
 .. warning::
 
   This setting should not have a trailing / on the end.
+
 
 .. _apikey_header_name:
 
@@ -201,6 +356,38 @@ Default value: ``None``
 
 Controls if we're caching CKAN's static files, if it's serving them.
 
+.. _ckan.use_pylons_response_cleanup_middleware:
+
+ckan.use_pylons_response_cleanup_middleware
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+Example::
+
+  ckan.use_pylons_response_cleanup_middleware = true
+
+Default value: true
+
+This enables middleware that clears the response string after it has been sent. This helps CKAN's memory management if CKAN repeatedly serves very large requests.
+
+.. _ckan.mimetype_guess:
+
+ckan.mimetype_guess
+^^^^^^^^^^^^^^^^^^^
+
+Example::
+
+  ckan.mimetype_guess = file_ext
+
+Default value: ``file_ext``
+
+There are three options for guessing the mimetype of uploaded or linked resources: file_ext, file_contents, None.
+
+``file_ext`` will guess the mimetype by the url first, then the file extension.
+
+``file_contents`` will guess the mimetype by the file itself, this tends to be inaccurate.
+
+``None`` will not store the mimetype for the resource.
+
 .. _ckan.static_max_age:
 
 ckan.static_max_age
@@ -227,6 +414,16 @@ Default value: ``False``
 
 This controls if CKAN will track the site usage. For more info, read :ref:`tracking`.
 
+ckan.valid_url_schemes
+^^^^^^^^^^^^^^^^^^^^^^
+
+Example::
+
+  ckan.valid_url_schemes = http https ftp sftp
+
+Default value: ``http https ftp``
+
+Controls what uri schemes are rendered as links.
 
 .. _config-authorization:
 
@@ -289,9 +486,9 @@ ckan.auth.user_create_groups
 
 Example::
 
- ckan.auth.user_create_groups = False
+ ckan.auth.user_create_groups = True
 
-Default value: ``True``
+Default value: ``False``
 
 
 Allow users to create groups.
@@ -350,7 +547,7 @@ Example::
 Default value: ``False``
 
 
-Allow new user accounts to be created via the API.
+Allow new user accounts to be created via the API by anyone. When ``False`` only sysadmins are authorised.
 
 .. _ckan.auth.create_user_via_web:
 
@@ -402,19 +599,6 @@ CKAN instance using the same `solr_url`_, they will each have a separate search 
 a single CKAN instance then this can be ignored.
 
 Note, if you change this value, you need to rebuild the search index.
-
-.. _ckan.simple_search:
-
-ckan.simple_search
-^^^^^^^^^^^^^^^^^^
-
-Example::
-
- ckan.simple_search = true
-
-Default value:  ``false``
-
-Switching this on tells CKAN search functionality to just query the database, (rather than using Solr). In this setup, search is crude and limited, e.g. no full-text search, no faceting, etc. However, this might be very useful for getting up and running quickly with CKAN.
 
 .. _solr_url:
 
@@ -470,12 +654,31 @@ ckan.search.show_all_types
 
 Example::
 
- ckan.search.show_all_types = true
+ ckan.search.show_all_types = dataset
 
 Default value:  ``false``
 
-Controls whether the default search page (``/dataset``) should show only
-standard datasets or also custom dataset types.
+Controls whether a search page (e.g. ``/dataset``) should also show 
+custom dataset types. The default is ``false`` meaning that no search 
+page for any type will show other types. ``true`` will show other types 
+on the ``/dataset`` search page. Any other value (e.g. ``dataset`` or 
+``document`` will be treated as a dataset type and that type's search 
+page will show datasets of all types.
+
+.. _ckan.search.default_include_private:
+
+ckan.search.default_include_private
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+Example::
+
+ ckan.search.default_include_private = false
+
+Default value:  ``true``
+
+Controls whether the default search page (``/dataset``) should include
+private datasets visible to the current user or only public datasets
+visible to everyone.
 
 .. _search.facets.limit:
 
@@ -513,6 +716,53 @@ Example::
 Default value: ``None``
 
 List of the extra resource fields that would be used when searching.
+
+
+Redis Settings
+---------------
+
+.. _ckan_redis_url:
+
+ckan.redis.url
+^^^^^^^^^^^^^^
+
+Example::
+
+    ckan.redis.url = redis://localhost:7000/1
+
+Default value: ``redis://localhost:6379/0``
+
+URL to your Redis instance, including the database to be used.
+
+.. versionadded:: 2.7
+
+
+CORS Settings
+-------------
+
+Cross-Origin Resource Sharing (CORS) can be enabled and controlled with the following settings:
+
+.. _ckan.cors.origin_allow_all:
+
+ckan.cors.origin_allow_all
+^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+Example::
+
+  ckan.cors.origin_allow_all = True
+
+This setting must be present to enable CORS. If True, all origins will be allowed (the response header Access-Control-Allow-Origin is set to '*'). If False, only origins from the ``ckan.cors.origin_whitelist`` setting will be allowed.
+
+.. _ckan.cors.origin_whitelist:
+
+ckan.cors.origin_whitelist
+^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+Example::
+
+  ckan.cors.origin_whitelist = http://www.myremotedomain1.com http://myremotedomain1.com
+
+A space separated list of allowable origins. This setting is used when ``ckan.cors.origin_allow_all = False``.
 
 
 Plugins Settings
@@ -562,21 +812,6 @@ Format as a space-separated list of the plugin names. The plugin name is the key
         they're given in the config file, regardless of which Python modules
         they're implemented in.
 
-.. _ckan.datastore.enabled:
-
-ckan.datastore.enabled
-^^^^^^^^^^^^^^^^^^^^^^
-
-Example::
-
-  ckan.datastore.enabled = True
-
-Default value: ``False``
-
-Controls if the Data API link will appear in Dataset's Resource page.
-
-.. note:: This setting only applies to the legacy templates.
-
 .. _ckanext.stats.cache_enabled:
 
 ckanext.stats.cache_enabled
@@ -589,6 +824,39 @@ Example::
 Default value:  ``True``
 
 This controls if we'll use the 1 day cache for stats.
+
+
+.. _ckan.resource_proxy.max_file_size:
+
+ckan.resource_proxy.max_file_size
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+Example::
+
+    ckan.resource_proxy.max_file_size = 1048576
+
+Default value:  ``1048576`` (1 MB)
+
+This sets the upper file size limit for in-line previews.
+Increasing the value allows CKAN to preview larger files (e.g. PDFs) in-line;
+however, a higher value might cause time-outs, or unresponsive browsers for CKAN users
+with lower bandwidth. If left commented out, CKAN will default to 1 MB.
+
+
+.. _ckan.resource_proxy.chunk_size:
+
+ckan.resource_proxy.chunk_size
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+Example::
+
+    ckan.resource_proxy.chunk_size = 8192
+
+Default value:  ``4096``
+
+This sets size of the chunk to read and write when proxying.
+Raising this value might save some CPU cycles. It makes no sense to lower it
+below the page size, which is default.
 
 
 Front-End Settings
@@ -727,7 +995,7 @@ Default value: ``False``
 
 This controls if the legacy genshi templates are used.
 
-.. note:: This is only for legacy code, and shouldn't be used anymore.
+.. note:: This is option is **deprecated** and has no effect any more.
 
 .. _ckan.datasets_per_page:
 
@@ -757,49 +1025,6 @@ This sets a space-separated list of extra field key values which will not be sho
 
 .. warning::  While this is useful to e.g. create internal notes, it is not a security measure. The keys will still be available via the API and in revision diffs.
 
-.. _ckan.dataset.show_apps_ideas:
-
-ckan.dataset.show_apps_ideas
-^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-
-ckan.dataset.show_apps_ideas::
-
- ckan.dataset.show_apps_ideas = false
-
-Default value:  true
-
-When set to false, or no, this setting will hide the 'Apps, Ideas, etc' tab on the package read page. If the value is not set, or is set to true or yes, then the tab will shown.
-
-.. note::  This only applies to the legacy Genshi-based templates
-
-.. _ckan.preview.direct:
-
-ckan.preview.direct
-^^^^^^^^^^^^^^^^^^^
-
-Example::
-
- ckan.preview.direct = png jpg jpeg gif
-
-Default value: ``png jpg jpeg gif``
-
-Defines the resource formats which should be embedded directly in an ``img`` tag
-when previewing them.
-
-.. _ckan.preview.loadable:
-
-ckan.preview.loadable
-^^^^^^^^^^^^^^^^^^^^^
-
-Example::
-
- ckan.preview.loadable = html htm rdf+xml owl+xml xml n3 n-triples turtle plain atom rss txt
-
-Default value: ``html htm rdf+xml owl+xml xml n3 n-triples turtle plain atom rss txt``
-
-Defines the resource formats which should be loaded directly in an ``iframe``
-tag when previewing them if no :doc:`data-viewer` can preview it.
-
 .. _ckan.dumps_url:
 
 ckan.dumps_url
@@ -811,7 +1036,7 @@ web interface. For example::
 
   ckan.dumps_url = http://ckan.net/dump/
 
-For more information on using dumpfiles, see :ref:`paster db`.
+For more information on using dumpfiles, see :ref:`datasets dump`.
 
 .. _ckan.dumps_format:
 
@@ -823,6 +1048,19 @@ then specify the format here, so that it can be advertised in the
 web interface. ``dumps_format`` is just a string for display. Example::
 
   ckan.dumps_format = CSV/JSON
+
+.. _ckan.recaptcha.version:
+
+ckan.recaptcha.version
+^^^^^^^^^^^^^^^^^^^^^^^^
+
+The version of Recaptcha to use, for example::
+
+ ckan.recaptcha.version = 1
+
+Default Value: 1
+
+Valid options: 1, 2
 
 .. _ckan.recaptcha.publickey:
 
@@ -856,13 +1094,13 @@ ckan.featured_groups
 
 Example::
 
- ckan.featured_groups = group_one group_two
+ ckan.featured_groups = group_one
 
 Default Value: (empty)
 
-Defines a list of group names or group ids. This setting is used to display
-groups and datasets from each group on the home page in the default templates
-(2 groups and 2 datasets for each group are displayed).
+Defines a list of group names or group ids. This setting is used to display a
+group and datasets on the home page in the default templates (1 group and 2
+datasets are displayed).
 
 .. _ckan.featured_organizations:
 
@@ -871,13 +1109,13 @@ ckan.featured_orgs
 
 Example::
 
- ckan.featured_orgs = org_one org_two
+ ckan.featured_orgs = org_one
 
 Default Value: (empty)
 
 Defines a list of organization names or ids. This setting is used to display
-organization and datasets from each group on the home page in the default
-templates (2 groups and 2 datasets for each group are displayed).
+an organization and datasets on the home page in the default templates (1
+group and 2 datasets are displayed).
 
 .. _ckan.gravatar_default:
 
@@ -909,6 +1147,91 @@ receiving the request being is shown in the header.
 .. note:: This info only shows if debug is set to True.
 
 .. end_config-front-end
+
+Resource Views Settings
+-----------------------
+
+.. start_resource-views
+
+.. _ckan.views.default_views:
+
+ckan.views.default_views
+^^^^^^^^^^^^^^^^^^^^^^^^
+
+Example::
+
+
+ ckan.views.default_views = image_view webpage_view recline_grid_view
+
+Default value: ``image_view recline_view``
+
+Defines the resource views that should be created by default when creating or
+updating a dataset. From this list only the views that are relevant to a particular
+resource format will be created. This is determined by each individual view.
+
+If not present (or commented), the default value is used. If left empty, no
+default views are created.
+
+.. note:: You must have the relevant view plugins loaded on the ``ckan.plugins``
+    setting to be able to create the default views, eg::
+
+        ckan.plugins = image_view webpage_view recline_grid_view ...
+
+        ckan.views.default_views = image_view webpage_view recline_grid_view
+
+.. _ckan.preview.json_formats:
+
+ckan.preview.json_formats
+^^^^^^^^^^^^^^^^^^^^^^^^^
+
+Example::
+
+ ckan.preview.json_formats = json
+
+Default value: ``json``
+
+Space-delimited list of JSON based resource formats that will be rendered by the Text view plugin (``text_view``)
+
+.. _ckan.preview.xml_formats:
+
+ckan.preview.xml_formats
+^^^^^^^^^^^^^^^^^^^^^^^^^
+
+Example::
+
+ ckan.preview.xml_formats = xml rdf rss
+
+Default value: ``xml rdf rdf+xml owl+xml atom rss``
+
+Space-delimited list of XML based resource formats that will be rendered by the Text view plugin (``text_view``)
+
+.. _ckan.preview.text_formats:
+
+ckan.preview.text_formats
+^^^^^^^^^^^^^^^^^^^^^^^^^
+
+Example::
+
+ ckan.preview.text_formats = text plain
+
+Default value: ``text plain text/plain``
+
+Space-delimited list of plain text based resource formats that will be rendered by the Text view plugin (``text_view``)
+
+.. _ckan.preview.image_formats:
+
+ckan.preview.image_formats
+^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+Example::
+
+ ckan.preview.image_formats = png jpeg jpg gif
+
+Default value: ``png jpeg jpg gif``
+
+Space-delimited list of image-based resource formats that will be rendered by the Image view plugin (``image_view``)
+
+.. end_resource-views
 
 Theming Settings
 ----------------
@@ -980,7 +1303,7 @@ Example::
 
  extra_template_paths = /home/okfn/brazil_ckan_config/templates
 
-To customise the display of CKAN you can supply replacements for the Genshi template files. Use this option to specify where CKAN should look for additional templates, before reverting to the ``ckan/templates`` folder. You can supply more than one folder, separating the paths with a comma (,).
+Use this option to specify where CKAN should look for additional templates, before reverting to the ``ckan/templates`` folder. You can supply more than one folder, separating the paths with a comma (,).
 
 For more information on theming, see :doc:`/theming/index`.
 
@@ -996,6 +1319,50 @@ Example::
 To customise the display of CKAN you can supply replacements for static files such as HTML, CSS, script and PNG files. Use this option to specify where CKAN should look for additional files, before reverting to the ``ckan/public`` folder. You can supply more than one folder, separating the paths with a comma (,).
 
 For more information on theming, see :doc:`/theming/index`.
+
+.. _ckan.base_public_folder:
+
+ckan.base_public_folder
+^^^^^^^^^^^^^^^^^^^^^^^
+
+Example::
+
+ ckan.base_public_folder = public
+
+Default value:  ``public``
+
+This config option is used to configure the base folder for static files used
+by CKAN core. It's used to determine which version of Bootstrap to be used.
+It accepts two values: ``public`` (Bootstrap 3, the default value from CKAN
+2.8 onwards) and ``public-bs2`` (Bootstrap 2, used until CKAN 2.7).
+
+It must be used in conjunction with :ref:`ckan.base_templates_folder` in order
+for it to properly function. Also, you can't use for example Bootstrap 3 for
+static files and Bootstrap 2 for templates or vice versa.
+
+.. note:: Starting with CKAN 2.8, Bootstrap 3 will be used as a default.
+
+.. _ckan.base_templates_folder:
+
+ckan.base_templates_folder
+^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+Example::
+
+ ckan.base_templates_folder = templates
+
+Default value:  ``templates``
+
+This config option is used to configure the base folder for templates used
+by CKAN core. It's used to determine which version of Bootstrap to be used.
+It accepts two values: ``templates`` (Bootstrap 3, the default value from CKAN
+2.8 onwards) and ``templates-bs2`` (Bootstrap 2, used until CKAN 2.7).
+
+It must be used in conjunction with :ref:`ckan.base_public_folder` in order
+for it to properly function. Also, you can't use for example Bootstrap 3 for
+templates and Bootstrap 2 for static files or vice versa.
+
+.. note:: Starting with CKAN 2.8, Bootstrap 3 will be used as a default.
 
 .. end_config-theming
 
@@ -1104,6 +1471,39 @@ DataPusher endpoint to use when enabling the ``datapusher`` extension. If you
 installed CKAN via :doc:`/maintaining/installing/install-from-package`, the DataPusher was installed for you
 running on port 8800. If you want to manually install the DataPusher, follow
 the installation `instructions <http://docs.ckan.org/projects/datapusher>`_.
+
+
+.. _ckan.datapusher.assume_task_stale_after:
+
+ckan.datapusher.assume_task_stale_after
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+Example::
+
+  ckan.datapusher.assume_task_stale_after = 86400
+
+Default value:  ``3600`` (one hour)
+
+In case a DataPusher task gets stuck and fails to recover, this is the minimum
+amount of time (in seconds) after a resource is submitted to DataPusher that the
+resource can be submitted again.
+
+
+User Settings
+-------------------------
+
+.. _ckan.user_list_limit:
+
+ckan.user_list_limit
+^^^^^^^^^^^^^^^^^^^^^^^^
+
+Example::
+
+  ckan.user_list_limit = 50
+
+Default value: ``20``
+
+This controls the number of users to show in the Users list. By default, it shows 20 users.
 
 
 Activity Streams Settings
@@ -1309,6 +1709,67 @@ Default value: (none)
 
 By default, the locales are searched for in the ``ckan/i18n`` directory. Use this option if you want to use another folder.
 
+.. _ckan.i18n.extra_directory:
+
+ckan.i18n.extra_directory
+^^^^^^^^^^^^^^^^^^^^^^^^^
+
+Example::
+
+  ckan.i18n.extra_directory = /opt/ckan/extra_translations/
+
+Default value: (none)
+
+If you wish to add extra translation strings and have them merged with the
+default ckan translations at runtime you can specify the location of the extra
+translations using this option.
+
+.. _ckan.i18n.extra_gettext_domain:
+
+ckan.i18n.extra_gettext_domain
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+Example::
+
+  ckan.i18n.extra_gettext_domain = mydomain
+
+Default value: (none)
+
+You can specify the name of the gettext domain of the extra translations. For
+example if your translations are stored as
+``i18n/<locale>/LC_MESSAGES/somedomain.mo`` you would want to set this option
+to ``somedomain``
+
+.. _ckan.i18n.extra_locales:
+
+ckan.i18n.extra_locales
+^^^^^^^^^^^^^^^^^^^^^^^
+
+Example::
+
+  ckan.i18n.extra_locales = fr es de
+
+Default value: (none)
+
+If you have set an extra i18n directory using ``ckan.i18n.extra_directory``, you
+should specify the locales that have been translated in that directory in this
+option.
+
+.. _ckan.display_timezone:
+
+ckan.display_timezone
+^^^^^^^^^^^^^^^^^^^^^
+
+Example::
+
+  ckan.display_timezone = Europe/Zurich
+
+Default value: UTC
+
+By default, all datetimes are considered to be in the UTC timezone. Use this option to change the displayed dates on the frontend. Internally, the dates are always saved as UTC. This option only changes the way the dates are displayed.
+
+The valid values for this options [can be found at pytz](http://pytz.sourceforge.net/#helpers) (``pytz.all_timezones``). You can specify the special value `server` to use the timezone settings of the server, that is running CKAN.
+
 .. _ckan.root_path:
 
 ckan.root_path
@@ -1320,10 +1781,27 @@ Example::
 
 Default value: (none)
 
-By default, the URLs are formatted as ``/some/url``, when using the default
-locale, or ``/de/some/url`` when using the "de" locale, for example. This
-lets you change this. You can use any path that you want, adding ``{{LANG}}``
-where you want the locale code to go.
+This setting is used to construct URLs inside CKAN. It specifies two things:
+
+* *At which path CKAN is mounted:* By default it is assumed that CKAN is mounted
+  at ``/``, i.e. at the root of your web server. If you have configured your
+  web server to serve CKAN from a different mount point then you need to
+  duplicate that setting here.
+
+* *Where the locale is added to an URL:* By default, URLs are formatted as
+  ``/some/url`` when using the default locale, or ``/de/some/url`` when using
+  the ``de`` locale, for example. When ``ckan.root_path`` is set it must
+  include the string ``{{LANG}}``, which will be replaced by the locale.
+
+.. important::
+
+    The setting must contain ``{{LANG}}`` exactly as written here. Do not add
+    spaces between the brackets.
+
+.. seealso::
+
+    The host of your CKAN installation can be set via :ref:`ckan.site_url`.
+
 
 .. _ckan.resource_formats:
 
@@ -1414,7 +1892,7 @@ smtp.server
 
 Example::
 
-  smtp.server = smtp.gmail.com:587
+  smtp.server = smtp.example.com:587
 
 Default value: ``None``
 
@@ -1440,7 +1918,7 @@ smtp.user
 
 Example::
 
-  smtp.user = your_username@gmail.com
+  smtp.user = username@example.com
 
 Default value: ``None``
 
@@ -1466,7 +1944,7 @@ smtp.mail_from
 
 Example::
 
-  smtp.mail_from = you@yourdomain.com
+  smtp.mail_from = ckan@example.com
 
 Default value: ``None``
 
@@ -1480,7 +1958,7 @@ email_to
 
 Example::
 
-  email_to = you@yourdomain.com
+  email_to = errors@example.com
 
 Default value: ``None``
 
@@ -1493,7 +1971,7 @@ error_email_from
 
 Example::
 
-  error_email_from = paste@localhost
+  error_email_from = ckan-errors@example.com
 
 Default value: ``None``
 

@@ -1,29 +1,31 @@
-# -*- coding: utf-8 -*-
-"""Pylons environment configuration"""
+# encoding: utf-8
+
+'''CKAN environment configuration'''
 import os
 import logging
 import warnings
 from urlparse import urlparse
+import pytz
 
-import pylons
-from paste.deploy.converters import asbool
 import sqlalchemy
-from pylons import config
-from genshi.template import TemplateLoader
-from genshi.filters.i18n import Translator
+from pylons import config as pylons_config
+import formencode
 
 import ckan.config.routing as routing
 import ckan.model as model
 import ckan.plugins as p
-import ckan.lib.helpers as h
+import ckan.lib.helpers as helpers
 import ckan.lib.app_globals as app_globals
+from ckan.lib.redis import is_redis_available
 import ckan.lib.render as render
 import ckan.lib.search as search
 import ckan.logic as logic
-import ckan.new_authz as new_authz
+import ckan.authz as authz
 import ckan.lib.jinja_extensions as jinja_extensions
+from ckan.lib.i18n import build_js_translations
 
-from ckan.common import _, ungettext
+from ckan.common import _, ungettext, config
+from ckan.exceptions import CkanConfigurationException
 
 log = logging.getLogger(__name__)
 
@@ -32,79 +34,11 @@ log = logging.getLogger(__name__)
 warnings.simplefilter('ignore', UserWarning)
 
 
-class _Helpers(object):
-    ''' Helper object giving access to template helpers stopping
-    missing functions from causing template exceptions. Useful if
-    templates have helper functions provided by extensions that have
-    not been enabled. '''
-    def __init__(self, helpers):
-        self.helpers = helpers
-        self._setup()
-
-    def _setup(self):
-        helpers = self.helpers
-        functions = {}
-        allowed = helpers.__allowed_functions__[:]
-        # list of functions due to be deprecated
-        self.deprecated = []
-
-        for helper in dir(helpers):
-            if helper not in allowed:
-                self.deprecated.append(helper)
-                continue
-            functions[helper] = getattr(helpers, helper)
-            if helper in allowed:
-                allowed.remove(helper)
-        self.functions = functions
-
-        if allowed:
-            raise Exception('Template helper function(s) `%s` not defined'
-                            % ', '.join(allowed))
-
-        # extend helper functions with ones supplied by plugins
-        extra_helpers = []
-        for plugin in p.PluginImplementations(p.ITemplateHelpers):
-            helpers = plugin.get_helpers()
-            for helper in helpers:
-                if helper in extra_helpers:
-                    raise Exception('overwritting extra helper %s' % helper)
-                extra_helpers.append(helper)
-                functions[helper] = helpers[helper]
-        # logging
-        self.log = logging.getLogger('ckan.helpers')
-
-    @classmethod
-    def null_function(cls, *args, **kw):
-        ''' This function is returned if no helper is found. The idea is
-        to try to allow templates to be rendered even if helpers are
-        missing.  Returning the empty string seems to work well.'''
-        return ''
-
-    def __getattr__(self, name):
-        ''' return the function/object requested '''
-        if name in self.functions:
-            if name in self.deprecated:
-                msg = 'Template helper function `%s` is deprecated' % name
-                self.log.warn(msg)
-            return self.functions[name]
-        else:
-            if name in self.deprecated:
-                msg = ('Template helper function `{0}` is not available '
-                       'because it has been deprecated.'.format(name))
-                self.log.critical(msg)
-            else:
-                msg = 'Helper function `%s` could not be found\n ' \
-                      '(are you missing an extension?)' % name
-                self.log.critical(msg)
-            return self.null_function
-
-
 def load_environment(global_conf, app_conf):
-    """Configure the Pylons environment via the ``pylons.config``
-    object.  This code should only need to be run once.
     """
-
-    ######  Pylons monkey-patch
+    Configure the Pylons environment via the ``pylons.config`` object. This
+    code should only need to be run once.
+    """
     # this must be run at a time when the env is semi-setup, thus inlined here.
     # Required by the deliverance plugin and iATI
     from pylons.wsgiapp import PylonsApp
@@ -117,107 +51,52 @@ def load_environment(global_conf, app_conf):
             return self.controller_classes[controller]
         # Check to see if its a dotted name
         if '.' in controller or ':' in controller:
-            mycontroller = pkg_resources \
-                .EntryPoint \
-                .parse('x=%s' % controller).load(False)
+            ep = pkg_resources.EntryPoint.parse('x={0}'.format(controller))
+
+            if hasattr(ep, 'resolve'):
+                # setuptools >= 10.2
+                mycontroller = ep.resolve()
+            else:
+                # setuptools >= 11.3
+                mycontroller = ep.load(False)
+
             self.controller_classes[controller] = mycontroller
             return mycontroller
         return find_controller_generic(self, controller)
     PylonsApp.find_controller = find_controller
-    ###### END evil monkey-patch
 
     os.environ['CKAN_CONFIG'] = global_conf['__file__']
 
     # Pylons paths
     root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
+    valid_base_public_folder_names = ['public', 'public-bs2']
+    static_files = app_conf.get('ckan.base_public_folder', 'public')
+    app_conf['ckan.base_public_folder'] = static_files
+
+    if static_files not in valid_base_public_folder_names:
+        raise CkanConfigurationException(
+            'You provided an invalid value for ckan.base_public_folder. '
+            'Possible values are: "public" and "public-bs2".'
+        )
+
+    log.info('Loading static files from %s' % static_files)
     paths = dict(root=root,
                  controllers=os.path.join(root, 'controllers'),
-                 static_files=os.path.join(root, 'public'),
+                 static_files=os.path.join(root, static_files),
                  templates=[])
 
-    # Initialize config with the basic options
-    config.init_app(global_conf, app_conf, package='ckan', paths=paths)
+    # Initialize main CKAN config object
+    config.update(global_conf)
+    config.update(app_conf)
 
-    #################################################################
-    #                                                               #
-    #                   HORRIBLE GENSHI HACK                        #
-    #                                                               #
-    #################################################################
-    #                                                               #
-    # Genshi does strange things to get stuff out of the template   #
-    # variables.  This stops it from handling properties in the     #
-    # correct way as it returns the property rather than the actual #
-    # value of the property.                                        #
-    #                                                               #
-    # By overriding lookup_attr() in the LookupBase class we are    #
-    # able to get the required behaviour.  Using @property allows   #
-    # us to move functionality out of templates whilst maintaining  #
-    # backwards compatability.                                      #
-    #                                                               #
-    #################################################################
+    # Initialize Pylons own config object
+    pylons_config.init_app(global_conf, app_conf, package='ckan', paths=paths)
 
-    '''
-    This code is based on Genshi code
-
-    Copyright © 2006-2012 Edgewall Software
-    All rights reserved.
-
-    Redistribution and use in source and binary forms, with or
-    without modification, are permitted provided that the following
-    conditions are met:
-
-        Redistributions of source code must retain the above copyright
-        notice, this list of conditions and the following disclaimer.
-
-        Redistributions in binary form must reproduce the above
-        copyright notice, this list of conditions and the following
-        disclaimer in the documentation and/or other materials provided
-        with the distribution.
-
-        The name of the author may not be used to endorse or promote
-        products derived from this software without specific prior
-        written permission.
-
-    THIS SOFTWARE IS PROVIDED BY THE AUTHOR "AS IS" AND ANY EXPRESS OR
-    IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED
-    WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
-    ARE DISCLAIMED. IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR ANY
-    DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
-    DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE
-    GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
-    INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER
-    IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR
-    OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN
-    IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
-    '''
-    from genshi.template.eval import LookupBase
-
-    @classmethod
-    def genshi_lookup_attr(cls, obj, key):
-        __traceback_hide__ = True
-        try:
-            val = getattr(obj, key)
-        except AttributeError:
-            if hasattr(obj.__class__, key):
-                raise
-            else:
-                try:
-                    val = obj[key]
-                except (KeyError, TypeError):
-                    val = cls.undefined(key, owner=obj)
-        if isinstance(val, property):
-            val = val.fget()
-        return val
-
-    setattr(LookupBase, 'lookup_attr', genshi_lookup_attr)
-    del genshi_lookup_attr
-    del LookupBase
-
-    #################################################################
-    #                                                               #
-    #                       END OF GENSHI HACK                      #
-    #                                                               #
-    #################################################################
+    # Update the main CKAN config object with the Pylons specific stuff, as it
+    # quite hard to keep them separated. This should be removed once Pylons
+    # support is dropped
+    config.update(pylons_config)
 
     # Setup the SQLAlchemy database engine
     # Suppress a couple of sqlalchemy warnings
@@ -229,25 +108,95 @@ def load_environment(global_conf, app_conf):
         warnings.filterwarnings('ignore', msg, sqlalchemy.exc.SAWarning)
 
     # load all CKAN plugins
-    p.load_all(config)
+    p.load_all()
+
+    # Check Redis availability
+    if not is_redis_available():
+        log.critical('Could not connect to Redis.')
+
+    app_globals.reset()
+
+    # issue #3260: remove idle transaction
+    # Session that was used for getting all config params nor committed,
+    # neither removed and we have idle connection as result
+    model.Session.commit()
+
+    # Build JavaScript translations. Must be done after plugins have
+    # been loaded.
+    build_js_translations()
+
+
+# A mapping of config settings that can be overridden by env vars.
+# Note: Do not remove the following lines, they are used in the docs
+# Start CONFIG_FROM_ENV_VARS
+CONFIG_FROM_ENV_VARS = {
+    'sqlalchemy.url': 'CKAN_SQLALCHEMY_URL',
+    'ckan.datastore.write_url': 'CKAN_DATASTORE_WRITE_URL',
+    'ckan.datastore.read_url': 'CKAN_DATASTORE_READ_URL',
+    'ckan.redis.url': 'CKAN_REDIS_URL',
+    'solr_url': 'CKAN_SOLR_URL',
+    'ckan.site_id': 'CKAN_SITE_ID',
+    'ckan.site_url': 'CKAN_SITE_URL',
+    'ckan.storage_path': 'CKAN_STORAGE_PATH',
+    'ckan.datapusher.url': 'CKAN_DATAPUSHER_URL',
+    'smtp.server': 'CKAN_SMTP_SERVER',
+    'smtp.starttls': 'CKAN_SMTP_STARTTLS',
+    'smtp.user': 'CKAN_SMTP_USER',
+    'smtp.password': 'CKAN_SMTP_PASSWORD',
+    'smtp.mail_from': 'CKAN_SMTP_MAIL_FROM'
+}
+# End CONFIG_FROM_ENV_VARS
 
 
 def update_config():
     ''' This code needs to be run when the config is changed to take those
-    changes into account. '''
+    changes into account. It is called whenever a plugin is loaded as the
+    plugin might have changed the config values (for instance it might
+    change ckan.site_url) '''
 
     for plugin in p.PluginImplementations(p.IConfigurer):
         # must do update in place as this does not work:
         # config = plugin.update_config(config)
         plugin.update_config(config)
 
-    root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    # Set whitelisted env vars on config object
     # This is set up before globals are initialized
-    site_id = os.environ.get('CKAN_SITE_ID')
-    if site_id:
-        config['ckan.site_id'] = site_id
+
+    ckan_db = os.environ.get('CKAN_DB', None)
+    if ckan_db:
+        msg = 'Setting CKAN_DB as an env var is deprecated and will be' \
+            ' removed in a future release. Use CKAN_SQLALCHEMY_URL instead.'
+        log.warn(msg)
+        config['sqlalchemy.url'] = ckan_db
+
+    for option in CONFIG_FROM_ENV_VARS:
+        from_env = os.environ.get(CONFIG_FROM_ENV_VARS[option], None)
+        if from_env:
+            config[option] = from_env
+
+    root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
     site_url = config.get('ckan.site_url', '')
+    if not site_url:
+        raise RuntimeError(
+            'ckan.site_url is not configured and it must have a value.'
+            ' Please amend your .ini file.')
+    if not site_url.lower().startswith('http'):
+        raise RuntimeError(
+            'ckan.site_url should be a full URL, including the schema '
+            '(http or https)')
+
+    display_timezone = config.get('ckan.display_timezone', '')
+    if (display_timezone and
+            display_timezone != 'server' and
+            display_timezone not in pytz.all_timezones):
+        raise CkanConfigurationException(
+            "ckan.display_timezone is not 'server' or a valid timezone"
+        )
+
+    # Remove backslash from site_url if present
+    config['ckan.site_url'] = config['ckan.site_url'].rstrip('/')
+
     ckan_host = config['ckan.host'] = urlparse(site_url).netloc
     if config.get('ckan.site_id') is None:
         if ':' in ckan_host:
@@ -257,11 +206,11 @@ def update_config():
         config['ckan.site_id'] = ckan_host
 
     # ensure that a favicon has been set
-    favicon = config.get('ckan.favicon', '/images/icons/ckan.ico')
+    favicon = config.get('ckan.favicon', '/base/images/ckan.ico')
     config['ckan.favicon'] = favicon
 
     # Init SOLR settings and check if the schema is compatible
-    #from ckan.lib.search import SolrSettings, check_solr_schema_version
+    # from ckan.lib.search import SolrSettings, check_solr_schema_version
 
     # lib.search is imported here as we need the config enabled and parsed
     search.SolrSettings.init(config.get('solr_url'),
@@ -274,46 +223,46 @@ def update_config():
     # The RoutesMiddleware needs its mapper updating if it exists
     if 'routes.middleware' in config:
         config['routes.middleware'].mapper = routes_map
+    # routes.named_routes is a CKAN thing
     config['routes.named_routes'] = routing.named_routes
     config['pylons.app_globals'] = app_globals.app_globals
     # initialise the globals
-    config['pylons.app_globals']._init()
+    app_globals.app_globals._init()
 
-    # add helper functions
-    helpers = _Helpers(h)
-    config['pylons.h'] = helpers
+    helpers.load_plugin_helpers()
+    config['pylons.h'] = helpers.helper_functions
 
-    ## redo template setup to use genshi.search_path
-    ## (so remove std template setup)
-    legacy_templates_path = os.path.join(root, 'templates_legacy')
-    jinja2_templates_path = os.path.join(root, 'templates')
-    if asbool(config.get('ckan.legacy_templates', 'no')):
-        # We want the new template path for extra snippets like the
-        # dataviewer and also for some testing stuff
-        template_paths = [legacy_templates_path, jinja2_templates_path]
-    else:
-        template_paths = [jinja2_templates_path, legacy_templates_path]
+    # Templates and CSS loading from configuration
+    valid_base_templates_folder_names = ['templates', 'templates-bs2']
+    templates = config.get('ckan.base_templates_folder', 'templates')
+    config['ckan.base_templates_folder'] = templates
+
+    if templates not in valid_base_templates_folder_names:
+        raise CkanConfigurationException(
+            'You provided an invalid value for ckan.base_templates_folder. '
+            'Possible values are: "templates" and "templates-bs2".'
+        )
+
+    jinja2_templates_path = os.path.join(root, templates)
+    log.info('Loading templates from %s' % jinja2_templates_path)
+    template_paths = [jinja2_templates_path]
 
     extra_template_paths = config.get('extra_template_paths', '')
     if extra_template_paths:
         # must be first for them to override defaults
         template_paths = extra_template_paths.split(',') + template_paths
-    config['pylons.app_globals'].template_paths = template_paths
+    config['computed_template_paths'] = template_paths
 
-    # Translator (i18n)
-    translator = Translator(pylons.translator)
-
-    def template_loaded(template):
-        translator.setup(template)
+    # Set the default language for validation messages from formencode
+    # to what is set as the default locale in the config
+    default_lang = config.get('ckan.locale_default', 'en')
+    formencode.api.set_stdtranslation(domain="FormEncode",
+                                      languages=[default_lang])
 
     # Markdown ignores the logger config, so to get rid of excessive
     # markdown debug messages in the log, set it to the level of the
     # root logger.
     logging.getLogger("MARKDOWN").setLevel(logging.getLogger().level)
-
-    # Create the Genshi TemplateLoader
-    config['pylons.app_globals'].genshi_loader = TemplateLoader(
-        template_paths, auto_reload=True, callback=template_loaded)
 
     # Create Jinja2 environment
     env = jinja_extensions.Environment(
@@ -331,27 +280,14 @@ def update_config():
     env.install_gettext_callables(_, ungettext, newstyle=True)
     # custom filters
     env.filters['empty_and_escape'] = jinja_extensions.empty_and_escape
-    env.filters['truncate'] = jinja_extensions.truncate
     config['pylons.app_globals'].jinja_env = env
 
     # CONFIGURATION OPTIONS HERE (note: all config options will override
     # any Pylons config options)
 
-    ckan_db = os.environ.get('CKAN_DB')
-    if ckan_db:
-        config['sqlalchemy.url'] = ckan_db
-
-    # for postgresql we want to enforce utf-8
-    sqlalchemy_url = config.get('sqlalchemy.url', '')
-    if sqlalchemy_url.startswith('postgresql://'):
-        extras = {'client_encoding': 'utf8'}
-    else:
-        extras = {}
-
-    engine = sqlalchemy.engine_from_config(config, 'sqlalchemy.', **extras)
-
-    if not model.meta.engine:
-        model.init_model(engine)
+    # Initialize SQLAlchemy
+    engine = sqlalchemy.engine_from_config(config, client_encoding='utf8')
+    model.init_model(engine)
 
     for plugin in p.PluginImplementations(p.IConfigurable):
         plugin.configure(config)
@@ -362,7 +298,8 @@ def update_config():
 
     # clear other caches
     logic.clear_actions_cache()
-    new_authz.clear_auth_functions_cache()
+    logic.clear_validators_cache()
+    authz.clear_auth_functions_cache()
 
     # Here we create the site user if they are not already in the database
     try:
@@ -375,6 +312,8 @@ def update_config():
     except sqlalchemy.exc.InternalError:
         # The database is not initialised.  Travis hits this
         pass
-    # if an extension or our code does not finish
-    # transaction properly db cli commands can fail
+
+    # Close current session and open database connections to ensure a clean
+    # clean environment even if an error occurs later on
     model.Session.remove()
+    model.Session.bind.dispose()

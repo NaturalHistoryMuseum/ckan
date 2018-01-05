@@ -1,24 +1,26 @@
-import paste.fixture
-import pylons.config as config
+# encoding: utf-8
+
+from ckan.tests.helpers import _get_test_app
+from ckan.common import config
 
 import ckan.model as model
-import ckan.tests as tests
 import ckan.plugins as p
 import ckan.lib.helpers as h
 import ckanext.reclineview.plugin as plugin
 import ckan.lib.create_test_data as create_test_data
-import ckan.config.middleware as middleware
+
+from ckan.tests import helpers, factories
 
 
-class BaseTestReclineViewBase(tests.WsgiAppCase):
+class BaseTestReclineViewBase():
     @classmethod
     def setup_class(cls):
         cls.config_templates = config['ckan.legacy_templates']
         config['ckan.legacy_templates'] = 'false'
-        wsgiapp = middleware.make_app(config['global_conf'], **config)
+
+        cls.app = _get_test_app()
         p.load(cls.view_type)
 
-        cls.app = paste.fixture.TestApp(wsgiapp)
         cls.p = cls.view_class()
 
         create_test_data.CreateTestData.create()
@@ -55,6 +57,67 @@ class TestReclineView(BaseTestReclineViewBase):
     def test_it_has_no_schema(self):
         schema = self.p.info().get('schema')
         assert schema is None, schema
+
+    def test_can_view_format_no_datastore(self):
+        '''
+        Test can_view with acceptable formats when datastore_active is False
+        (DataProxy in use).
+        '''
+        formats = ['CSV', 'XLS', 'TSV', 'csv', 'xls', 'tsv']
+        for resource_format in formats:
+            data_dict = {'resource': {'datastore_active': False,
+                                      'format': resource_format}}
+            assert self.p.can_view(data_dict)
+
+    def test_can_view_bad_format_no_datastore(self):
+        '''
+        Test can_view with incorrect formats when datastore_active is False.
+        '''
+        formats = ['TXT', 'txt', 'doc', 'JSON']
+        for resource_format in formats:
+            data_dict = {'resource': {'datastore_active': False,
+                                      'format': resource_format}}
+            assert not self.p.can_view(data_dict)
+
+
+class TestReclineViewDatastoreOnly(helpers.FunctionalTestBase):
+
+    @classmethod
+    def setup_class(cls):
+        cls.app = _get_test_app()
+        if not p.plugin_loaded('recline_view'):
+            p.load('recline_view')
+        if not p.plugin_loaded('datastore'):
+            p.load('datastore')
+        app_config = config.copy()
+        app_config['ckan.legacy_templates'] = 'false'
+        app_config['ckan.plugins'] = 'recline_view datastore'
+        app_config['ckan.views.default_views'] = 'recline_view'
+
+    @classmethod
+    def teardown_class(cls):
+        if p.plugin_loaded('recline_view'):
+            p.unload('recline_view')
+        if p.plugin_loaded('datastore'):
+            p.unload('datastore')
+
+    def test_create_datastore_only_view(self):
+        dataset = factories.Dataset()
+        data = {
+            'resource': {'package_id': dataset['id']},
+            'fields': [{'id': 'a'}, {'id': 'b'}],
+            'records': [{'a': 1, 'b': 'xyz'}, {'a': 2, 'b': 'zzz'}]
+        }
+        result = helpers.call_action('datastore_create', **data)
+
+        resource_id = result['resource_id']
+
+        url = h.url_for(controller='package', action='resource_read',
+                        id=dataset['id'], resource_id=resource_id)
+
+        result = self.app.get(url)
+
+        assert 'data-module="data-viewer"' in result.body
 
 
 class TestReclineGridView(BaseTestReclineViewBase):

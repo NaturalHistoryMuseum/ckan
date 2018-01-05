@@ -1,3 +1,5 @@
+.. _action api:
+
 =========
 API guide
 =========
@@ -58,6 +60,11 @@ code that calls the CKAN API.  For example, using the CKAN API your app can:
    legacy-api
 
 
+.. note:: On early CKAN versions, datasets were called "packages" and this name
+    has stuck in some places, specially internally and on API calls. Package has
+    exactly the same meaning as "dataset".
+
+
 ---------------------
 Making an API request
 ---------------------
@@ -72,7 +79,7 @@ of all the datasets in the ``data-explorer`` group on demo.ckan.org, install
 HTTPie and then call the ``group_list`` API function by running this command
 in a terminal::
 
-    http http://demo.ckan.org/api/3/action/group_list id=data-explorer
+    http http://demo.ckan.org/api/3/action/group_list
 
 The response from CKAN will look like this::
 
@@ -137,9 +144,6 @@ with this Python code::
     import json
     import pprint
 
-    # Use the json module to dump a dictionary to a string for posting.
-    data_string = urllib.quote(json.dumps({'id': 'data-explorer'}))
-
     # Make the HTTP request.
     response = urllib2.urlopen('http://demo.ckan.org/api/3/action/group_list',
             data_string)
@@ -180,6 +184,7 @@ to import datasets into CKAN.
     dataset_dict = {
         'name': 'my_dataset_name',
         'notes': 'A long description of my dataset',
+        'owner_org': 'org_id_or_name'
     }
 
     # Use the json module to dump the dictionary to a string for posting.
@@ -314,7 +319,7 @@ call. The function is named in the 'callback' parameter. For example:
 
 http://demo.ckan.org/api/3/action/package_show?id=adur_district_spending&callback=myfunction
 
-.. todo :: This doesn't work with all functions.
+.. note :: This only works for GET requests
 
 
 .. _api-examples:
@@ -322,6 +327,45 @@ http://demo.ckan.org/api/3/action/package_show?id=adur_district_spending&callbac
 ------------
 API Examples
 ------------
+
+
+Tags (not in a vocabulary)
+==========================
+
+A list of all tags:
+
+* browser: http://demo.ckan.org/api/3/action/tag_list
+* curl: ``curl http://demo.ckan.org/api/3/action/tag_list``
+* ckanapi: ``ckanapi -r http://demo.ckan.org action tag_list``
+
+Top 10 tags used by datasets:
+
+* browser: http://demo.ckan.org/api/action/package_search?facet.field=[%22tags%22]&facet.limit=10&rows=0
+* curl: ``curl 'http://demo.ckan.org/api/action/package_search?facet.field=\["tags"\]&facet.limit=10&rows=0'``
+* ckanapi: ``ckanapi -r http://demo.ckan.org action package_search facet.field='["tags"]' facet.limit=10 rows=0``
+
+All datasets that have tag 'economy':
+
+* browser: http://demo.ckan.org/api/3/action/package_search?fq=tags:economy
+* curl: ``curl 'http://demo.ckan.org/api/3/action/package_search?fq=tags:economy'``
+* ckanapi: ``ckanapi -r http://demo.ckan.org action package_search fq='tags:economy'``
+
+Tag Vocabularies
+================
+
+Top 10 tags and vocabulary tags used by datasets:
+
+* browser: http://demo.ckan.org/api/action/package_search?facet.field=[%22tags%22]&facet.limit=10&rows=0
+* curl: ``curl 'http://demo.ckan.org/api/action/package_search?facet.field=\["tags"\]&facet.limit=10&rows=0'``
+* ckanapi: ``ckanapi -r http://demo.ckan.org action package_search facet.field='["tags"]' facet.limit=10 rows=0``
+
+e.g. Facet: `vocab_Topics` means there is a vocabulary called Topics, and its top tags are listed under it.
+
+A list of datasets using tag 'education' from vocabulary 'Topics':
+
+* browser: https://data.hdx.rwlabs.org/api/3/action/package_search?fq=vocab_Topics:education
+* curl: ``curl 'https://data.hdx.rwlabs.org/api/3/action/package_search?fq=vocab_Topics:education'``
+* ckanapi: ``ckanapi -r https://data.hdx.rwlabs.org action package_search fq='vocab_Topics:education'``
 
 
 Uploading a new version of a resource file
@@ -379,6 +423,14 @@ ckan.logic.action.update
 ========================
 
 .. automodule:: ckan.logic.action.update
+   :members:
+
+ckan.logic.action.patch
+=======================
+
+.. versionadded:: 2.3
+
+.. automodule:: ckan.logic.action.patch
    :members:
 
 ckan.logic.action.delete

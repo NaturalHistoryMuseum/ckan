@@ -1859,7 +1859,7 @@ class DatastorePostgresqlBackend(DatastoreBackend):
         return upsert(context, data_dict)
 
     def search(self, context, data_dict):
-        data_dict['connection_url'] = self.write_url
+        data_dict['connection_url'] = self.read_url
         return search(context, data_dict)
 
     def search_sql(self, context, data_dict):

@@ -3385,6 +3385,11 @@ my.SlickGrid = Backbone.View.extend({
     });
 
     this.grid = new Slick.Grid(this.el, data, visibleColumns, options);
+
+    // Make the grid object available to other plugins, eg.
+    // jQuery('div.recline-slickgrid').get(0).grid
+    this.el.grid = this.grid;
+
     // Column sorting
     var sortInfo = this.model.queryState.get('sort');
     if (sortInfo){

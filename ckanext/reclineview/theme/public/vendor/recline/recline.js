@@ -3211,17 +3211,21 @@ my.SlickGrid = Backbone.View.extend({
     // custom formatter as default one escapes html
     // plus this way we distinguish between rendering/formatting and computed value (so e.g. sort still works ...)
     // row = row index, cell = cell index, value = value, columnDef = column definition, dataContext = full row values
-    var formatter = function(row, cell, value, columnDef, dataContext) {
-      if(columnDef.id == "del"){
-        return self.templates.deleterow
+    var formatter;
+    // Only define the formatter if there's no formatter factory defined
+    if(!('defaultFormatter' in options || 'formatterFactory' in options)){
+      formatter = function(row, cell, value, columnDef, dataContext) {
+        if(columnDef.id == "del"){
+          return self.templates.deleterow
       }
       var field = self.model.fields.get(columnDef.id);
-      if (field.renderer) {
-        return  field.renderer(value, field, dataContext);
-      } else {
-        return  value
-      }
-    };
+        if (field.renderer) {
+          return  field.renderer(value, field, dataContext);
+        } else {
+          return  value
+        }
+      };
+    }
 
     // we need to be sure that user is entering a valid  input , for exemple if
     // field is date type and field.format ='YY-MM-DD', we should be sure that

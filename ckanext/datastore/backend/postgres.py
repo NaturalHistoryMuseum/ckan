@@ -23,7 +23,7 @@ from ckan.lib.lazyjson import LazyJSONObject
 import ckanext.datastore.helpers as datastore_helpers
 import ckanext.datastore.interfaces as interfaces
 
-import psycopg2.extras
+from psycopg2.extras import register_default_json, register_composite
 import distutils.version
 from sqlalchemy.exc import (ProgrammingError, IntegrityError,
                             DBAPIError, DataError)
@@ -117,6 +117,14 @@ def _get_engine_from_url(connection_url):
                                                'ckan.datastore.sqlalchemy.',
                                                **extras)
         _engines[connection_url] = engine
+
+    # don't automatically convert to python objects
+    # when using native json types in 9.2+
+    # http://initd.org/psycopg/docs/extras.html#adapt-json
+    register_default_json(conn_or_curs=engine.raw_connection().connection,
+                          globally=False,
+                          loads=lambda x: x)
+
     return engine
 
 
@@ -274,9 +282,7 @@ def _cache_types(context):
             # redo cache types with json now available.
             return _cache_types(context)
 
-        psycopg2.extras.register_composite('nested',
-                                           connection.connection,
-                                           True)
+        register_composite('nested', connection.connection, True)
 
 
 def _pg_version_is_at_least(connection, version):
@@ -314,7 +320,7 @@ def _change_privilege(context, data_dict, what):
         })
     try:
         context['connection'].execute(sql)
-    except ProgrammingError, e:
+    except ProgrammingError as e:
         log.critical("Error making resource private. {0!r}".format(e.message))
         raise ValidationError({
             'privileges': [
@@ -534,7 +540,7 @@ def create_alias(context, data_dict):
                     })
 
                 context['connection'].execute(sql_alias_string)
-        except DBAPIError, e:
+        except DBAPIError as e:
             if e.orig.pgcode in [_PG_ERR_CODE['duplicate_table'],
                                  _PG_ERR_CODE['duplicate_alias']]:
                 raise ValidationError({
@@ -638,7 +644,7 @@ def _is_valid_pg_type(context, type_name):
         connection = context['connection']
         try:
             connection.execute('SELECT %s::regtype', type_name)
-        except ProgrammingError, e:
+        except ProgrammingError as e:
             if e.orig.pgcode in [_PG_ERR_CODE['undefined_object'],
                                  _PG_ERR_CODE['syntax_error']]:
                 return False
@@ -712,9 +718,7 @@ def _where(where_clauses_and_values):
 
     for clause_and_values in where_clauses_and_values:
         where_clauses.append('(' + clause_and_values[0] + ')')
-        values += map(lambda v:
-                      v.replace('%3B', ';') if isinstance(v,  basestring)
-                      else v, clause_and_values[1:])
+        values += clause_and_values[1:]
 
     where_clause = u' AND '.join(where_clauses)
     if where_clause:
@@ -1440,7 +1444,7 @@ def upsert(context, data_dict):
         upsert_data(context, data_dict)
         trans.commit()
         return _unrename_json_field(data_dict)
-    except IntegrityError, e:
+    except IntegrityError as e:
         if e.orig.pgcode == _PG_ERR_CODE['unique_violation']:
             raise ValidationError({
                 'constraints': ['Cannot insert records or create index because'
@@ -1451,19 +1455,19 @@ def upsert(context, data_dict):
                 }
             })
         raise
-    except DataError, e:
+    except DataError as e:
         raise ValidationError({
             'data': e.message,
             'info': {
                 'orig': [str(e.orig)]
             }})
-    except DBAPIError, e:
+    except DBAPIError as e:
         if e.orig.pgcode == _PG_ERR_CODE['query_canceled']:
             raise ValidationError({
                 'query': ['Query took too long']
             })
         raise
-    except Exception, e:
+    except Exception as e:
         trans.rollback()
         raise
     finally:
@@ -1481,7 +1485,7 @@ def search(context, data_dict):
         context['connection'].execute(
             u'SET LOCAL statement_timeout TO {0}'.format(timeout))
         return search_data(context, data_dict)
-    except DBAPIError, e:
+    except DBAPIError as e:
         if e.orig.pgcode == _PG_ERR_CODE['query_canceled']:
             raise ValidationError({
                 'query': ['Search took too long']
@@ -1526,7 +1530,7 @@ def search_sql(context, data_dict):
 
         return format_results(context, results, data_dict)
 
-    except ProgrammingError, e:
+    except ProgrammingError as e:
         if e.orig.pgcode == _PG_ERR_CODE['permission_denied']:
             raise toolkit.NotAuthorized({
                 'permissions': ['Not authorized to read resource.']
@@ -1544,7 +1548,7 @@ def search_sql(context, data_dict):
                 'orig': [_remove_explain(str(e.orig))]
             }
         })
-    except DBAPIError, e:
+    except DBAPIError as e:
         if e.orig.pgcode == _PG_ERR_CODE['query_canceled']:
             raise ValidationError({
                 'query': ['Query took too long']
@@ -1827,7 +1831,7 @@ class DatastorePostgresqlBackend(DatastoreBackend):
                 _change_privilege(context, data_dict, 'REVOKE')
             trans.commit()
             return _unrename_json_field(data_dict)
-        except IntegrityError, e:
+        except IntegrityError as e:
             if e.orig.pgcode == _PG_ERR_CODE['unique_violation']:
                 raise ValidationError({
                     'constraints': ['Cannot insert records or create index'
@@ -1838,19 +1842,19 @@ class DatastorePostgresqlBackend(DatastoreBackend):
                     }
                 })
             raise
-        except DataError, e:
+        except DataError as e:
             raise ValidationError({
                 'data': e.message,
                 'info': {
                     'orig': [str(e.orig)]
                 }})
-        except DBAPIError, e:
+        except DBAPIError as e:
             if e.orig.pgcode == _PG_ERR_CODE['query_canceled']:
                 raise ValidationError({
                     'query': ['Query took too long']
                 })
             raise
-        except Exception, e:
+        except Exception as e:
             trans.rollback()
             raise
         finally:
@@ -1861,7 +1865,7 @@ class DatastorePostgresqlBackend(DatastoreBackend):
         return upsert(context, data_dict)
 
     def search(self, context, data_dict):
-        data_dict['connection_url'] = self.read_url
+        data_dict['connection_url'] = self.write_url
         return search(context, data_dict)
 
     def search_sql(self, context, data_dict):

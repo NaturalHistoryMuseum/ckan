@@ -11,6 +11,7 @@ from email import Utils
 
 from ckan.common import config
 import paste.deploy.converters
+from six import text_type
 
 import ckan
 import ckan.model as model
@@ -28,7 +29,11 @@ class MailerException(Exception):
 
 def _mail_recipient(recipient_name, recipient_email,
                     sender_name, sender_url, subject,
-                    body, headers={}):
+                    body, headers=None):
+
+    if not headers:
+        headers = {}
+
     mail_from = config.get('smtp.mail_from')
     msg = MIMEText(body.encode('utf-8'), 'plain', 'utf-8')
     for k, v in headers.items():
@@ -182,7 +187,7 @@ def send_invite(user, group_dict=None, role=None):
 
 
 def create_reset_key(user):
-    user.reset_key = unicode(make_key())
+    user.reset_key = text_type(make_key())
     model.repo.commit_and_remove()
 
 

@@ -11,6 +11,7 @@ import socket
 from ckan.common import config
 import sqlalchemy
 from paste.deploy.converters import asbool
+from six import string_types, text_type
 
 import ckan.lib.dictization
 import ckan.logic as logic
@@ -1146,46 +1147,6 @@ def resource_view_list(context, data_dict):
     return model_dictize.resource_view_list_dictize(resource_views, context)
 
 
-def resource_status_show(context, data_dict):
-    '''Return the statuses of a resource's tasks.
-
-    This function is DEPRECATED.
-
-    :param id: the id of the resource
-    :type id: string
-
-    :rtype: list of (status, date_done, traceback, task_status) dictionaries
-
-    '''
-
-    _check_access('resource_status_show', context, data_dict)
-
-    try:
-        import ckan.lib.celery_app as celery_app
-    except ImportError:
-        return {'message': 'queue is not installed on this instance'}
-
-    model = context['model']
-    id = _get_or_bust(data_dict, 'id')
-
-    # needs to be text query as celery tables are not in our model
-    q = _text("""
-        select status, date_done, traceback, task_status.*
-        from task_status left join celery_taskmeta
-        on task_status.value = celery_taskmeta.task_id
-           and key = 'celery_task_id'
-        where entity_id = :entity_id
-    """)
-    try:
-        result = model.Session.connection().execute(q, entity_id=id)
-    except sqlalchemy.exc.ProgrammingError:
-        # celery tables (celery_taskmeta) may not be created even with celery
-        # installed, causing ProgrammingError exception.
-        return {'message': 'queue tables not installed on this instance'}
-    result_list = [_table_dictize(row, context) for row in result]
-    return result_list
-
-
 @logic.auth_audit_exempt
 def revision_show(context, data_dict):
     '''Return the details of a revision.
@@ -2110,7 +2071,7 @@ def resource_search(context, data_dict):
             {'fields': _('Do not specify if using "query" parameter')})
 
     elif query is not None:
-        if isinstance(query, basestring):
+        if isinstance(query, string_types):
             query = [query]
         try:
             fields = dict(pair.split(":", 1) for pair in query)
@@ -2126,7 +2087,7 @@ def resource_search(context, data_dict):
         # So maintain that behaviour
         split_terms = {}
         for field, terms in fields.items():
-            if isinstance(terms, basestring):
+            if isinstance(terms, string_types):
                 terms = terms.split()
             split_terms[field] = terms
         fields = split_terms
@@ -2144,7 +2105,7 @@ def resource_search(context, data_dict):
     resource_fields = model.Resource.get_columns()
     for field, terms in fields.items():
 
-        if isinstance(terms, basestring):
+        if isinstance(terms, string_types):
             terms = [terms]
 
         if field not in resource_fields:
@@ -2168,7 +2129,7 @@ def resource_search(context, data_dict):
 
             # Treat the has field separately, see docstring.
             if field == 'hash':
-                q = q.filter(model_attr.ilike(unicode(term) + '%'))
+                q = q.filter(model_attr.ilike(text_type(term) + '%'))
 
             # Resource extras are stored in a json blob.  So searching for
             # matching fields is a bit trickier.  See the docstring.
@@ -2185,7 +2146,7 @@ def resource_search(context, data_dict):
 
             # Just a regular field
             else:
-                q = q.filter(model_attr.ilike('%' + unicode(term) + '%'))
+                q = q.filter(model_attr.ilike('%' + text_type(term) + '%'))
 
     if order_by is not None:
         if hasattr(model.Resource, order_by):
@@ -2216,7 +2177,7 @@ def _tag_search(context, data_dict):
     model = context['model']
 
     terms = data_dict.get('query') or data_dict.get('q') or []
-    if isinstance(terms, basestring):
+    if isinstance(terms, string_types):
         terms = [terms]
     terms = [t.strip() for t in terms if t.strip()]
 
@@ -2403,7 +2364,7 @@ def term_translation_show(context, data_dict):
     # This action accepts `terms` as either a list of strings, or a single
     # string.
     terms = _get_or_bust(data_dict, 'terms')
-    if isinstance(terms, basestring):
+    if isinstance(terms, string_types):
         terms = [terms]
     if terms:
         q = q.where(trans_table.c.term.in_(terms))
@@ -2412,7 +2373,7 @@ def term_translation_show(context, data_dict):
     # string.
     if 'lang_codes' in data_dict:
         lang_codes = _get_or_bust(data_dict, 'lang_codes')
-        if isinstance(lang_codes, basestring):
+        if isinstance(lang_codes, string_types):
             lang_codes = [lang_codes]
         q = q.where(trans_table.c.lang_code.in_(lang_codes))
 

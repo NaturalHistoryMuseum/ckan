@@ -15,7 +15,8 @@ import ckan.tests.legacy as tests
 from ckan.common import config
 import ckanext.datastore.backend.postgres as db
 from ckanext.datastore.tests.helpers import (
-    extract, rebuild_all_dbs, DatastoreFunctionalTestBase)
+    extract, rebuild_all_dbs,
+    DatastoreFunctionalTestBase, DatastoreLegacyTestBase)
 
 import ckan.tests.helpers as helpers
 import ckan.tests.factories as factories
@@ -25,16 +26,7 @@ assert_raises = nose.tools.assert_raises
 assert_in = nose.tools.assert_in
 
 
-class TestDatastoreSearchNewTest(object):
-    @classmethod
-    def setup_class(cls):
-        p.load('datastore')
-
-    @classmethod
-    def teardown_class(cls):
-        p.unload('datastore')
-        helpers.reset_db()
-
+class TestDatastoreSearchNewTest(DatastoreFunctionalTestBase):
     def test_fts_on_field_calculates_ranks_only_on_that_specific_field(self):
         resource = factories.Resource()
         data = {
@@ -110,17 +102,14 @@ class TestDatastoreSearchNewTest(object):
 
 
 
-class TestDatastoreSearch():
+class TestDatastoreSearch(DatastoreLegacyTestBase):
     sysadmin_user = None
     normal_user = None
 
     @classmethod
     def setup_class(cls):
-
-        if not tests.is_datastore_supported():
-            raise nose.SkipTest("Datastore not supported")
         cls.app = helpers._get_test_app()
-        p.load('datastore')
+        super(TestDatastoreSearch, cls).setup_class()
         ctd.CreateTestData.create()
         cls.sysadmin_user = model.User.get('testsysadmin')
         cls.normal_user = model.User.get('annafan')
@@ -173,11 +162,6 @@ class TestDatastoreSearch():
 
         engine = db.get_write_engine()
         cls.Session = orm.scoped_session(orm.sessionmaker(bind=engine))
-
-    @classmethod
-    def teardown_class(cls):
-        rebuild_all_dbs(cls.Session)
-        p.unload('datastore')
 
     def test_search_basic(self):
         data = {'resource_id': self.data['resource_id']}
@@ -651,13 +635,11 @@ class TestDatastoreSearch():
         assert res_dict['error'].get('fields') is not None, res_dict['error']
 
 
-class TestDatastoreFullTextSearch():
+class TestDatastoreFullTextSearch(DatastoreLegacyTestBase):
     @classmethod
     def setup_class(cls):
-        if not tests.is_datastore_supported():
-            raise nose.SkipTest("Datastore not supported")
         cls.app = helpers._get_test_app()
-        p.load('datastore')
+        super(TestDatastoreFullTextSearch, cls).setup_class()
         ctd.CreateTestData.create()
         cls.sysadmin_user = model.User.get('testsysadmin')
         cls.normal_user = model.User.get('annafan')
@@ -691,11 +673,6 @@ class TestDatastoreFullTextSearch():
                            extra_environ=auth)
         res_dict = json.loads(res.body)
         assert res_dict['success'] is True
-
-    @classmethod
-    def teardown_class(cls):
-        model.repo.rebuild_db()
-        p.unload('datastore')
 
     def test_search_full_text(self):
         data = {'resource_id': self.data['resource_id'],
@@ -779,16 +756,14 @@ class TestDatastoreFullTextSearch():
         assert res_dict['success'], pprint.pformat(res_dict)
 
 
-class TestDatastoreSQL():
+class TestDatastoreSQL(DatastoreLegacyTestBase):
     sysadmin_user = None
     normal_user = None
 
     @classmethod
     def setup_class(cls):
-        if not tests.is_datastore_supported():
-            raise nose.SkipTest("Datastore not supported")
         cls.app = helpers._get_test_app()
-        plugin = p.load('datastore')
+        super(TestDatastoreSQL, cls).setup_class()
         ctd.CreateTestData.create()
         cls.sysadmin_user = model.User.get('testsysadmin')
         cls.normal_user = model.User.get('annafan')
@@ -841,11 +816,6 @@ class TestDatastoreSQL():
 
         engine = db.get_write_engine()
         cls.Session = orm.scoped_session(orm.sessionmaker(bind=engine))
-
-    @classmethod
-    def teardown_class(cls):
-        rebuild_all_dbs(cls.Session)
-        p.unload('datastore')
 
     def test_validates_sql_has_a_single_statement(self):
         sql = 'SELECT * FROM public."{0}"; SELECT * FROM public."{0}";'.format(self.data['resource_id'])
@@ -1065,3 +1035,140 @@ class TestDatastoreSQLFunctional(DatastoreFunctionalTestBase):
             'datastore_search_sql',
             context=ctx3,
             sql=sql3)
+
+
+class TestDatastoreSearchRecordsFormat(DatastoreFunctionalTestBase):
+    def test_sort_results_objects(self):
+        ds = factories.Dataset()
+        r = helpers.call_action(
+            u'datastore_create',
+            resource={u'package_id': ds['id']},
+            fields=[
+                {u'id': u'num', u'type': u'numeric'},
+                {u'id': u'dt', u'type': u'timestamp'},
+                {u'id': u'txt', u'type': u'text'}],
+            records=[
+                {u'num': 10, u'dt': u'2020-01-01', u'txt': 'aaab'},
+                {u'num': 9, u'dt': u'2020-01-02', u'txt': 'aaab'},
+                {u'num': 9, u'dt': u'2020-01-01', u'txt': 'aaac'}])
+        assert_equals(
+            helpers.call_action(
+                'datastore_search',
+                resource_id=r['resource_id'],
+                sort=u'num, dt')['records'],
+            [
+                {u'_id': 3, u'num': 9, u'dt': u'2020-01-01T00:00:00', u'txt': u'aaac'},
+                {u'_id': 2, u'num': 9, u'dt': u'2020-01-02T00:00:00', u'txt': u'aaab'},
+                {u'_id': 1, u'num': 10, u'dt': u'2020-01-01T00:00:00', u'txt': u'aaab'},
+            ])
+        assert_equals(
+            helpers.call_action(
+                'datastore_search',
+                resource_id=r['resource_id'],
+                sort=u'dt, txt')['records'],
+            [
+                {u'_id': 1, u'num': 10, u'dt': u'2020-01-01T00:00:00', u'txt': u'aaab'},
+                {u'_id': 3, u'num': 9, u'dt': u'2020-01-01T00:00:00', u'txt': u'aaac'},
+                {u'_id': 2, u'num': 9, u'dt': u'2020-01-02T00:00:00', u'txt': u'aaab'},
+            ])
+        assert_equals(
+            helpers.call_action(
+                'datastore_search',
+                resource_id=r['resource_id'],
+                sort=u'txt, num')['records'],
+            [
+                {u'_id': 2, u'num': 9, u'dt': u'2020-01-02T00:00:00', u'txt': u'aaab'},
+                {u'_id': 1, u'num': 10, u'dt': u'2020-01-01T00:00:00', u'txt': u'aaab'},
+                {u'_id': 3, u'num': 9, u'dt': u'2020-01-01T00:00:00', u'txt': u'aaac'},
+            ])
+
+    def test_sort_results_lists(self):
+        ds = factories.Dataset()
+        r = helpers.call_action(
+            u'datastore_create',
+            resource={u'package_id': ds['id']},
+            fields=[
+                {u'id': u'num', u'type': u'numeric'},
+                {u'id': u'dt', u'type': u'timestamp'},
+                {u'id': u'txt', u'type': u'text'}],
+            records=[
+                {u'num': 10, u'dt': u'2020-01-01', u'txt': u'aaab'},
+                {u'num': 9, u'dt': u'2020-01-02', u'txt': u'aaab'},
+                {u'num': 9, u'dt': u'2020-01-01', u'txt': u'aaac'}])
+        assert_equals(
+            helpers.call_action(
+                'datastore_search',
+                resource_id=r['resource_id'],
+                records_format=u'lists',
+                sort=u'num, dt')['records'],
+            [
+                [3, 9, u'2020-01-01T00:00:00', u'aaac'],
+                [2, 9, u'2020-01-02T00:00:00', u'aaab'],
+                [1, 10, u'2020-01-01T00:00:00', u'aaab'],
+            ])
+        assert_equals(
+            helpers.call_action(
+                'datastore_search',
+                resource_id=r['resource_id'],
+                records_format=u'lists',
+                sort=u'dt, txt')['records'],
+            [
+                [1, 10, u'2020-01-01T00:00:00', u'aaab'],
+                [3, 9, u'2020-01-01T00:00:00', u'aaac'],
+                [2, 9, u'2020-01-02T00:00:00', u'aaab'],
+            ])
+        assert_equals(
+            helpers.call_action(
+                'datastore_search',
+                resource_id=r['resource_id'],
+                records_format=u'lists',
+                sort=u'txt, num')['records'],
+            [
+                [2, 9, u'2020-01-02T00:00:00', u'aaab'],
+                [1, 10, u'2020-01-01T00:00:00', u'aaab'],
+                [3, 9, u'2020-01-01T00:00:00', u'aaac'],
+            ])
+
+    def test_sort_results_csv(self):
+        ds = factories.Dataset()
+        r = helpers.call_action(
+            u'datastore_create',
+            resource={u'package_id': ds['id']},
+            fields=[
+                {u'id': u'num', u'type': u'numeric'},
+                {u'id': u'dt', u'type': u'timestamp'},
+                {u'id': u'txt', u'type': u'text'}],
+            records=[
+                {u'num': 10, u'dt': u'2020-01-01', u'txt': u'aaab'},
+                {u'num': 9, u'dt': u'2020-01-02', u'txt': u'aaab'},
+                {u'num': 9, u'dt': u'2020-01-01', u'txt': u'aaac'}])
+        assert_equals(
+            helpers.call_action(
+                'datastore_search',
+                resource_id=r['resource_id'],
+                records_format=u'csv',
+                sort=u'num, dt')['records'],
+            u'3,9,2020-01-01T00:00:00,aaac\n'
+            u'2,9,2020-01-02T00:00:00,aaab\n'
+            u'1,10,2020-01-01T00:00:00,aaab\n'
+            )
+        assert_equals(
+            helpers.call_action(
+                'datastore_search',
+                resource_id=r['resource_id'],
+                records_format=u'csv',
+                sort=u'dt, txt')['records'],
+            u'1,10,2020-01-01T00:00:00,aaab\n'
+            u'3,9,2020-01-01T00:00:00,aaac\n'
+            u'2,9,2020-01-02T00:00:00,aaab\n'
+            )
+        assert_equals(
+            helpers.call_action(
+                'datastore_search',
+                resource_id=r['resource_id'],
+                records_format=u'csv',
+                sort=u'txt, num')['records'],
+            u'2,9,2020-01-02T00:00:00,aaab\n'
+            u'1,10,2020-01-01T00:00:00,aaab\n'
+            u'3,9,2020-01-01T00:00:00,aaac\n'
+            )

@@ -22,22 +22,14 @@ log = logging.getLogger(__name__)
 # with the WSGI environ.
 
 # Start of webob.requests.BaseRequest monkey patch
-original_charset__set = webob.request.BaseRequest._charset__set
+original_charset__set = webob.request.BaseRequest.charset.setter
 
 
+@webob.request.BaseRequest.charset.setter
 def custom_charset__set(self, charset):
     original_charset__set(self, charset)
     if self.environ.get('CONTENT_TYPE', '').startswith(';'):
         self.environ['CONTENT_TYPE'] = ''
-
-
-webob.request.BaseRequest._charset__set = custom_charset__set
-
-webob.request.BaseRequest.charset = property(
-    webob.request.BaseRequest._charset__get,
-    custom_charset__set,
-    webob.request.BaseRequest._charset__del,
-    webob.request.BaseRequest._charset__get.__doc__)
 
 # End of webob.requests.BaseRequest monkey patch
 

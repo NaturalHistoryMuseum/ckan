@@ -27,7 +27,7 @@ class TestPylonsSession(dict):
 
 
 class PylonsTestCase(object):
-    """A basic test case which allows access to pylons.c and pylons.request.
+    """A basic test case which allows access to pylons.tmpl_context and pylons.request.
     """
     @classmethod
     def setup_class(cls):
@@ -35,7 +35,7 @@ class PylonsTestCase(object):
         cls.registry.prepare()
 
         cls.context_obj=AttribSafeContextObj()
-        cls.registry.register(pylons.c, cls.context_obj)
+        cls.registry.register(pylons.tmpl_context, cls.context_obj)
 
         cls.app_globals_obj = app_globals.app_globals
         cls.registry.register(pylons.app_globals, cls.app_globals_obj)
@@ -58,7 +58,7 @@ class PylonsTestCase(object):
             'action': 'test-action',
             'controller': 'test-package::',
         }})
-        pylons.c.environ = pylons.request.environ
+        pylons.tmpl_context.environ = pylons.request.environ
 
     @classmethod
     def teardown_class(cls):

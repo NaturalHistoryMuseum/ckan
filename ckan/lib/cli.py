@@ -260,8 +260,8 @@ def load_config(config, load_site_user=True):
 
         site_user = logic.get_action('get_site_user')({'ignore_auth': True}, {})
 
-        pylons.c.user = site_user['name']
-        pylons.c.userobj = model.User.get(site_user['name'])
+        pylons.tmpl_context.user = site_user['name']
+        pylons.tmpl_context.userobj = model.User.get(site_user['name'])
 
     ## give routes enough information to run url_for
     parsed = urlparse(conf.get('ckan.site_url', 'http://0.0.0.0'))

@@ -256,7 +256,7 @@ def load_config(config, load_site_user=True):
         # auth works as in a normal web request
         c = pylons.util.AttribSafeContextObj()
 
-        registry.register(pylons.c, c)
+        registry.register(pylons.tmpl_context, c)
 
         site_user = logic.get_action('get_site_user')({'ignore_auth': True}, {})
 

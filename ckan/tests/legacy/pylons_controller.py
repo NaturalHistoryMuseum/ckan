@@ -38,7 +38,7 @@ class PylonsTestCase(object):
         cls.registry.register(pylons.c, cls.context_obj)
 
         cls.app_globals_obj = app_globals.app_globals
-        cls.registry.register(pylons.g, cls.app_globals_obj)
+        cls.registry.register(pylons.app_globals, cls.app_globals_obj)
 
         cls.request_obj=Request(dict(HTTP_HOST="nohost", REQUEST_METHOD="GET"))
         cls.registry.register(pylons.request, cls.request_obj)

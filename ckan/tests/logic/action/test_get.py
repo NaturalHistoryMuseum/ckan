@@ -857,12 +857,17 @@ class TestPackageSearch(helpers.FunctionalTestBase):
         eq(search_result['count'], 1)
 
     def test_search_fl(self):
-        factories.Dataset(title='Rivers', name='test_ri')
-        factories.Dataset(title='Lakes')
+        d1 = factories.Dataset(title='Rivers', name='test_ri')
+        d2 = factories.Dataset(title='Lakes')
 
         search_result = helpers.call_action('package_search', q='rivers', fl=['title', 'name'])
-
         eq(search_result['results'], [{'title': 'Rivers', 'name': 'test_ri'}])
+
+        search_result = helpers.call_action('package_search', q='rivers', fl='title,name')
+        eq(search_result['results'], [{'title': 'Rivers', 'name': 'test_ri'}])
+
+        search_result = helpers.call_action('package_search', q='rivers', fl=['id'])
+        eq(search_result['results'], [{'id': d1['id']}])
 
     def test_search_all(self):
         factories.Dataset(title='Rivers')
@@ -1267,10 +1272,19 @@ class TestPackageSearch(helpers.FunctionalTestBase):
         '''
         logic.get_action('package_search')({}, dict(q='anything'))
 
-    def test_custom_schema_returned(self):
-        if not p.plugin_loaded('example_idatasetform'):
-            p.load('example_idatasetform')
 
+class TestPackageAutocompleteWithDatasetForm(helpers.FunctionalTestBase):
+    @classmethod
+    def _apply_config_changes(cls, cfg):
+        cfg['ckan.plugins'] = 'example_idatasetform'
+
+    @classmethod
+    def teardown_class(cls):
+        super(TestPackageAutocompleteWithDatasetForm, cls).teardown_class()
+        if p.plugin_loaded('example_idatasetform'):
+            p.unload('example_idatasetform')
+
+    def test_custom_schema_returned(self):
         dataset1 = factories.Dataset(custom_text='foo')
 
         query = helpers.call_action('package_search',
@@ -1279,13 +1293,7 @@ class TestPackageSearch(helpers.FunctionalTestBase):
         eq(query['results'][0]['id'], dataset1['id'])
         eq(query['results'][0]['custom_text'], 'foo')
 
-        p.unload('example_idatasetform')
-
     def test_custom_schema_not_returned(self):
-
-        if not p.plugin_loaded('example_idatasetform'):
-            p.load('example_idatasetform')
-
         dataset1 = factories.Dataset(custom_text='foo')
 
         query = helpers.call_action('package_search',
@@ -1296,8 +1304,6 @@ class TestPackageSearch(helpers.FunctionalTestBase):
         assert 'custom_text' not in query['results'][0]
         eq(query['results'][0]['extras'][0]['key'], 'custom_text')
         eq(query['results'][0]['extras'][0]['value'], 'foo')
-
-        p.unload('example_idatasetform')
 
     def test_local_parameters_not_supported(self):
 
@@ -2154,6 +2160,9 @@ class TestFollow(helpers.FunctionalTestBase):
 
 
 class TestStatusShow(helpers.FunctionalTestBase):
+    @classmethod
+    def _apply_config_changes(cls, cfg):
+        cfg['ckan.plugins'] = 'stats'
 
     def test_status_show(self):
 

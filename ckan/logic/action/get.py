@@ -1261,7 +1261,7 @@ def group_show(context, data_dict):
          (optional, default: ``True``)
     :type include_extras: bool
     :param include_users: include the group's users
-         (optional, default: ``True``)
+         (optional, default: ``False``)
     :type include_users: bool
     :param include_groups: include the group's sub groups
          (optional, default: ``True``)
@@ -1815,6 +1815,9 @@ def package_search(context, data_dict):
     for key in [key for key in data_dict.keys() if key.startswith('ext_')]:
         data_dict['extras'][key] = data_dict.pop(key)
 
+    # set default search field
+    data_dict['df'] = 'text'
+
     # check if some extension needs to modify the search params
     for item in plugins.PluginImplementations(plugins.IPackageController):
         data_dict = item.before_search(data_dict)
@@ -1867,6 +1870,8 @@ def package_search(context, data_dict):
 
         if result_fl:
             for package in query.results:
+                if isinstance(package, text_type):
+                    package = {result_fl[0]: package}
                 if package.get('extras'):
                     package.update(package['extras'] )
                     package.pop('extras')

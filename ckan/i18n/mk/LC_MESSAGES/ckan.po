@@ -2,7 +2,7 @@
 # Copyright (C) 2018 ORGANIZATION
 # This file is distributed under the same license as the ckan project.
 # FIRST AUTHOR <EMAIL@ADDRESS>, 2018.
-# 
+#
 #, fuzzy
 msgid ""
 msgstr ""
@@ -39,12 +39,12 @@ msgstr "Грешка"
 msgid "Not Uploaded Yet"
 msgstr "Сè уште не е прикачено"
 
-#: ckan/controllers/package.py:613 ckan/controllers/package.py:1076
-#: ckan/controllers/package.py:1096 ckan/controllers/package.py:1163
-#: ckan/controllers/package.py:1346 ckan/controllers/package.py:1424
-#: ckan/controllers/package.py:1455 ckan/controllers/package.py:1563
-#: ckan/controllers/package.py:1614 ckanext/datapusher/plugin.py:59
-#: ckanext/datastore/controller.py:80 ckanext/resourceproxy/controller.py:33
+#: ckan/controllers/package.py:591 ckan/controllers/package.py:1054
+#: ckan/controllers/package.py:1074 ckan/controllers/package.py:1141
+#: ckan/controllers/package.py:1324 ckan/controllers/package.py:1402
+#: ckan/controllers/package.py:1433 ckan/controllers/package.py:1541
+#: ckan/controllers/package.py:1592 ckanext/datapusher/plugin.py:59
+#: ckanext/datastore/controller.py:73 ckanext/resourceproxy/controller.py:33
 msgid "Resource not found"
 msgstr "Ресурсот не е пронајден"
 
@@ -126,7 +126,7 @@ msgstr "формат: мора да биде еден од %s"
 msgid "DataStore resource not found"
 msgstr "Ресурсот не е пронајден во податочното складиште"
 
-#: ckanext/datastore/controller.py:101
+#: ckanext/datastore/backend/postgres.py:1032
 msgid ""
 "Data Dictionary saved. Any type overrides will take effect when the resource"
 " is next uploaded to DataStore"
@@ -871,6 +871,11 @@ msgstr "JSON грешка: %s"
 msgid "Bad request data: %s"
 msgstr "Погрешни податоци во барање: %s"
 
+#: ckan/controllers/api.py:300
+#, python-format
+msgid "Cannot list entity of this type: %s"
+msgstr ""
+
 #: ckan/controllers/api.py:283
 msgid "No revision specified"
 msgstr "Нема ревизија назначено"
@@ -911,16 +916,15 @@ msgid "Request params must be in form of a json encoded dictionary."
 msgstr ""
 "Параметрите за барањето мора да бидат во форма на json енкодиран речник."
 
-#: ckan/controllers/feed.py:234 ckan/controllers/group.py:128
-#: ckan/controllers/group.py:226 ckan/controllers/group.py:394
-#: ckan/controllers/group.py:504 ckan/controllers/group.py:537
-#: ckan/controllers/group.py:567 ckan/controllers/group.py:578
-#: ckan/controllers/group.py:632 ckan/controllers/group.py:653
-#: ckan/controllers/group.py:714 ckan/controllers/group.py:746
-#: ckan/controllers/group.py:779 ckan/controllers/group.py:836
-#: ckan/controllers/group.py:933 ckan/controllers/package.py:1265
-#: ckan/controllers/package.py:1280 ckan/logic/action/create.py:1373
-#: ckan/views/feed.py:143
+#: ckan/controllers/feed.py:233 ckan/controllers/group.py:137
+#: ckan/controllers/group.py:225 ckan/controllers/group.py:393
+#: ckan/controllers/group.py:503 ckan/controllers/group.py:536
+#: ckan/controllers/group.py:566 ckan/controllers/group.py:577
+#: ckan/controllers/group.py:631 ckan/controllers/group.py:649
+#: ckan/controllers/group.py:707 ckan/controllers/group.py:739
+#: ckan/controllers/group.py:772 ckan/controllers/group.py:829
+#: ckan/controllers/group.py:926 ckan/controllers/package.py:1243
+#: ckan/controllers/package.py:1258 ckan/logic/action/create.py:1396
 msgid "Group not found"
 msgstr "Групата не е пронајдена"
 
@@ -1112,15 +1116,15 @@ msgstr "Невалидно пребарување: {error_message}"
 msgid "Parameter \"{parameter_name}\" is not an integer"
 msgstr "Параметарот \"{parameter_name}\" не е цел број"
 
-#: ckan/controllers/package.py:343 ckan/controllers/package.py:351
-#: ckan/controllers/package.py:389 ckan/controllers/package.py:456
-#: ckan/controllers/package.py:775 ckan/controllers/package.py:823
-#: ckan/controllers/package.py:841 ckan/controllers/package.py:942
-#: ckan/controllers/package.py:990 ckan/controllers/package.py:1042
-#: ckan/controllers/package.py:1089 ckan/controllers/package.py:1237
-#: ckan/controllers/package.py:1253 ckan/controllers/package.py:1316
-#: ckan/controllers/package.py:1415 ckan/controllers/package.py:1450
-#: ckan/controllers/package.py:1557
+#: ckan/controllers/package.py:324 ckan/controllers/package.py:332
+#: ckan/controllers/package.py:370 ckan/controllers/package.py:437
+#: ckan/controllers/package.py:753 ckan/controllers/package.py:801
+#: ckan/controllers/package.py:819 ckan/controllers/package.py:920
+#: ckan/controllers/package.py:968 ckan/controllers/package.py:1020
+#: ckan/controllers/package.py:1067 ckan/controllers/package.py:1215
+#: ckan/controllers/package.py:1231 ckan/controllers/package.py:1294
+#: ckan/controllers/package.py:1393 ckan/controllers/package.py:1428
+#: ckan/controllers/package.py:1535
 msgid "Dataset not found"
 msgstr "Податочниот сет не е пронајден"
 
@@ -1302,12 +1306,10 @@ msgstr "Нема назначено корисник"
 msgid "Unauthorized to edit user %s"
 msgstr "Не сте овластени за да го промените корисникот %s"
 
-#: ckan/controllers/user.py:233 ckan/controllers/user.py:248
-#: ckan/controllers/user.py:315 ckan/controllers/user.py:378
-#: ckan/controllers/user.py:523 ckan/controllers/user.py:549
-#: ckan/logic/auth/update.py:179 ckan/views/user.py:220 ckan/views/user.py:248
-#: ckan/views/user.py:315 ckan/views/user.py:452 ckan/views/user.py:573
-#: ckan/views/user.py:618
+#: ckan/controllers/user.py:232 ckan/controllers/user.py:247
+#: ckan/controllers/user.py:314 ckan/controllers/user.py:377
+#: ckan/controllers/user.py:524 ckan/controllers/user.py:546
+#: ckan/logic/auth/update.py:179
 msgid "User not found"
 msgstr "Корисникот не е пронајден"
 
@@ -1728,17 +1730,17 @@ msgstr "организација"
 msgid "group"
 msgstr "група"
 
-#: ckan/lib/navl/dictization_functions.py:16
-#: ckan/lib/navl/dictization_functions.py:19
-#: ckan/lib/navl/dictization_functions.py:22
-#: ckan/lib/navl/dictization_functions.py:25
-#: ckan/lib/navl/dictization_functions.py:28
-#: ckan/lib/navl/dictization_functions.py:31
-#: ckan/lib/navl/dictization_functions.py:34
-#: ckan/lib/navl/dictization_functions.py:37 ckan/lib/navl/validators.py:27
-#: ckan/lib/navl/validators.py:34 ckan/lib/navl/validators.py:54
-#: ckan/logic/action/get.py:2033 ckan/logic/action/update.py:261
-#: ckan/logic/validators.py:615
+#: ckan/lib/navl/dictization_functions.py:14
+#: ckan/lib/navl/dictization_functions.py:17
+#: ckan/lib/navl/dictization_functions.py:20
+#: ckan/lib/navl/dictization_functions.py:23
+#: ckan/lib/navl/dictization_functions.py:26
+#: ckan/lib/navl/dictization_functions.py:29
+#: ckan/lib/navl/dictization_functions.py:32
+#: ckan/lib/navl/dictization_functions.py:35 ckan/lib/navl/validators.py:25
+#: ckan/lib/navl/validators.py:32 ckan/lib/navl/validators.py:52
+#: ckan/logic/action/get.py:2083 ckan/logic/action/update.py:257
+#: ckan/logic/validators.py:607
 msgid "Missing value"
 msgstr "Недостасува вредност"
 
@@ -2358,6 +2360,14 @@ msgstr "Корисникот %s не е овластен да ја ажурир�
 #, python-format
 msgid "User %s not authorized to update term_translation table"
 msgstr "Кориникот %sне е овластен да ја ажурира \"term_translation\" табелата"
+
+#: ckan/logic/auth/update.py:262
+msgid "Valid API key needed to edit a package"
+msgstr ""
+
+#: ckan/logic/auth/update.py:272
+msgid "Valid API key needed to edit a group"
+msgstr ""
 
 #: ckan/model/license.py:223
 msgid "License not specified"
@@ -3491,6 +3501,10 @@ msgstr "организации"
 msgid "groups"
 msgstr "групи"
 
+#: ckan/templates/macros/autoform.html:62
+msgid "Site logo"
+msgstr ""
+
 #: ckan/templates/macros/form.html:126
 #, python-format
 msgid ""
@@ -3538,6 +3552,10 @@ msgstr "Форма за организација"
 #: ckan/templates/organization/bulk_process.html:11
 msgid "Edit datasets"
 msgstr "Промена на податочни сетови"
+
+#: ckan/templates/organization/bulk_process.html:6
+msgid "Add dataset"
+msgstr ""
 
 #: ckan/templates/organization/bulk_process.html:16
 msgid " found for \"{query}\""
@@ -3652,6 +3670,12 @@ msgstr "Ажурирајте организација"
 #: ckan/templates/organization/new_organization_form.html:19
 msgid "Create Organization"
 msgstr "Креирајте организација"
+
+#: ckan/templates/organization/read.html:5
+#: ckan/templates/package/search.html:16
+#: ckan/templates/user/dashboard_datasets.html:7
+msgid "Add Dataset"
+msgstr ""
 
 #: ckan/templates/organization/snippets/feeds.html:3
 msgid "Datasets in organization: {group}"
@@ -4455,6 +4479,10 @@ msgstr "Не постои опис за оваа организација"
 #: ckan/templates/snippets/package_item.html:57
 msgid "This dataset has no description"
 msgstr "Овој податочен сет нема опис"
+
+#: ckan/templates/snippets/search_form.html:17
+msgid "Submit"
+msgstr ""
 
 #: ckan/templates/snippets/search_form.html:33
 #: ckan/templates/snippets/simple_search.html:8

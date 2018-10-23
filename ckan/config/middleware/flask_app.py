@@ -27,6 +27,9 @@ from ckan.lib import helpers
 from ckan.lib import jinja_extensions
 from ckan.common import config, g, request, ungettext
 import ckan.lib.app_globals as app_globals
+import ckan.lib.plugins as lib_plugins
+
+
 from ckan.plugins import PluginImplementations
 from ckan.plugins.interfaces import IBlueprint, IMiddleware, ITranslation
 from ckan.views import (identify_user,
@@ -35,7 +38,7 @@ from ckan.views import (identify_user,
                         set_controller_and_action
                         )
 
-
+import ckan.lib.plugins as lib_plugins
 import logging
 log = logging.getLogger(__name__)
 
@@ -74,7 +77,6 @@ def make_flask_stack(conf, **app_conf):
 
     debug = asbool(conf.get('debug', conf.get('DEBUG', False)))
     testing = asbool(app_conf.get('testing', app_conf.get('TESTING', False)))
-
     app = flask_app = CKANFlask(__name__)
     app.debug = debug
     app.testing = testing
@@ -184,6 +186,9 @@ def make_flask_stack(conf, **app_conf):
             for blueprint in plugin_blueprints:
                 app.register_extension_blueprint(blueprint)
 
+    lib_plugins.register_package_blueprints(app)
+    lib_plugins.register_group_blueprints(app)
+
     # Set flask routes in named_routes
     for rule in app.url_map.iter_rules():
         if '.' not in rule.endpoint:
@@ -205,6 +210,8 @@ def make_flask_stack(conf, **app_conf):
         app = plugin.make_middleware(app, config)
 
     # Fanstatic
+    fanstatic_enable_rollup = asbool(app_conf.get('fanstatic_enable_rollup',
+                                                  False))
     if debug:
         fanstatic_config = {
             'versioning': True,
@@ -212,6 +219,7 @@ def make_flask_stack(conf, **app_conf):
             'minified': False,
             'bottom': True,
             'bundle': False,
+            'rollup': fanstatic_enable_rollup,
         }
     else:
         fanstatic_config = {
@@ -220,6 +228,7 @@ def make_flask_stack(conf, **app_conf):
             'minified': True,
             'bottom': True,
             'bundle': True,
+            'rollup': fanstatic_enable_rollup,
         }
     root_path = config.get('ckan.root_path', None)
     if root_path:
@@ -307,7 +316,8 @@ def ckan_after_request(response):
 
 def helper_functions():
     u'''Make helper functions (`h`) available to Flask templates'''
-    helpers.load_plugin_helpers()
+    if not helpers.helper_functions:
+        helpers.load_plugin_helpers()
     return dict(h=helpers.helper_functions)
 
 

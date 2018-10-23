@@ -2,7 +2,7 @@
 # Copyright (C) 2018 ORGANIZATION
 # This file is distributed under the same license as the ckan project.
 # FIRST AUTHOR <EMAIL@ADDRESS>, 2018.
-# 
+#
 #, fuzzy
 msgid ""
 msgstr ""
@@ -2333,7 +2333,11 @@ msgid "User %s not authorized to update term_translation table"
 msgstr ""
 "Notandinn %s hefur ekki réttindi til að uppfæra töfluna term_translation"
 
-#: ckan/model/license.py:223
+#: ckan/logic/auth/update.py:272
+msgid "Valid API key needed to edit a group"
+msgstr "Þú verður að hafa gildan API lykil til að breyta safni"
+
+#: ckan/model/license.py:222
 msgid "License not specified"
 msgstr "Skilmálar ekki tilgreindir"
 

@@ -62,9 +62,6 @@ def walk_python_files():
 def test_building_the_docs():
     u'''There should be no warnings or errors when building the Sphinx docs.
 
-    This test unfortunately does take quite a long time to run - rebuilding the
-    docs from scratch just takes a long time.
-
     This test will also fail is build_sphinx exits with non-zero status.
 
     '''
@@ -72,9 +69,7 @@ def test_building_the_docs():
         output = subprocess.check_output(
             [b'python',
              b'setup.py',
-             b'build_sphinx',
-             b'--all-files',
-             b'--fresh-env'],
+             b'build_sphinx'],
             stderr=subprocess.STDOUT)
     except subprocess.CalledProcessError as err:
         assert False, (
@@ -260,7 +255,6 @@ _STRING_LITERALS_WHITELIST = [
     u'ckan/controllers/package.py',
     u'ckan/controllers/partyline.py',
     u'ckan/controllers/revision.py',
-    u'ckan/controllers/storage.py',
     u'ckan/controllers/tag.py',
     u'ckan/controllers/user.py',
     u'ckan/controllers/util.py',
@@ -268,7 +262,6 @@ _STRING_LITERALS_WHITELIST = [
     u'ckan/i18n/check_po_files.py',
     u'ckan/lib/activity_streams.py',
     u'ckan/lib/activity_streams_session_extension.py',
-    u'ckan/lib/alphabet_paginate.py',
     u'ckan/lib/app_globals.py',
     u'ckan/lib/auth_tkt.py',
     u'ckan/lib/authenticator.py',
@@ -446,7 +439,6 @@ _STRING_LITERALS_WHITELIST = [
     u'ckan/tests/controllers/test_home.py',
     u'ckan/tests/controllers/test_organization.py',
     u'ckan/tests/controllers/test_package.py',
-    u'ckan/tests/controllers/test_tags.py',
     u'ckan/tests/controllers/test_user.py',
     u'ckan/tests/controllers/test_util.py',
     u'ckan/tests/factories.py',
@@ -488,7 +480,6 @@ _STRING_LITERALS_WHITELIST = [
     u'ckan/tests/legacy/functional/test_user.py',
     u'ckan/tests/legacy/html_check.py',
     u'ckan/tests/legacy/lib/__init__.py',
-    u'ckan/tests/legacy/lib/test_alphabet_pagination.py',
     u'ckan/tests/legacy/lib/test_authenticator.py',
     u'ckan/tests/legacy/lib/test_cli.py',
     u'ckan/tests/legacy/lib/test_dictization.py',
@@ -528,7 +519,6 @@ _STRING_LITERALS_WHITELIST = [
     u'ckan/tests/legacy/models/test_resource.py',
     u'ckan/tests/legacy/models/test_revision.py',
     u'ckan/tests/legacy/models/test_user.py',
-    u'ckan/tests/legacy/pylons_controller.py',
     u'ckan/tests/legacy/schema/test_schema.py',
     u'ckan/tests/legacy/test_coding_standards.py',
     u'ckan/tests/legacy/test_plugins.py',

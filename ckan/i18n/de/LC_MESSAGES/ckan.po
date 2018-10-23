@@ -2,7 +2,7 @@
 # Copyright (C) 2018 ORGANIZATION
 # This file is distributed under the same license as the ckan project.
 # FIRST AUTHOR <EMAIL@ADDRESS>, 2018.
-# 
+#
 #, fuzzy
 msgid ""
 msgstr ""
@@ -1036,7 +1036,7 @@ msgstr ""
 msgid "Unauthorized to create group %s members"
 msgstr "Keine Berechtigung, um Gruppenmitglieder %szuerstellen"
 
-#: ckan/controllers/group.py:712
+#: ckan/controllers/group.py:705
 #, python-format
 msgid "Unauthorized to add member to group %s"
 msgstr "Keine Berichtigung Mitglieder zur Gruppe %s hinzuzufügen"

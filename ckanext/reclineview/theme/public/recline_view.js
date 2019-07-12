@@ -1,4 +1,12 @@
 this.ckan.module('recline_view', function (jQuery) {
+  var NoRecordsView = Backbone.View.extend({
+    template: '<div class="recline-norecords">{{text}}</div>',
+    render: function(){
+      var self = this;
+      var htmls = Mustache.render(self.template, {text: self.options.i18n.noRecords});
+      self.$el.html(htmls);
+    }
+  });
   return {
     options: {
       site_url: "",
@@ -96,7 +104,12 @@ this.ckan.module('recline_view', function (jQuery) {
           state,
           controls = [];
 
-      if(reclineView.view_type === "recline_graph_view") {
+      if(typeof(dataset.recordCount) == 'undefined' || dataset.recordCount == 0){
+        view = new NoRecordsView({
+          'model': dataset,
+          i18n: {noRecords:this.options.i18n.noRecords}
+        });
+      } else if(reclineView.view_type === "recline_graph_view") {
         state = {
           "graphType": reclineView.graph_type,
           "group": reclineView.group,

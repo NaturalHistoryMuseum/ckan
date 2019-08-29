@@ -77,8 +77,8 @@ this.ckan.module('recline_view', function (jQuery) {
       jQuery.each(filters, function (field,values) {
         query.addFilter({type: 'term', field: field, term: values});
       });
-      if (window.parent.ckan.views.filters.get('q')){
-          query.set({ q: window.parent.ckan.views.filters.get('q') });
+      if (window.parent.ckan.views.filters._searchParams.q){
+          query.set({ q: window.parent.ckan.views.filters._searchParams.q });
       }
 
       dataset.queryState.set(query.toJSON(), {silent: true});

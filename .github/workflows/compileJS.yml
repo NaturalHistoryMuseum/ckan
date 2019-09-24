@@ -26,5 +26,5 @@ jobs:
           git config user.email "$GITHUB_ACTOR@users.noreply.github.com"
           git checkout `echo $GITHUB_REF | cut -d'/' -f3-`
           git add `echo $MODIFIED | jq -r 'join(" ")'`
-          git commit -m "[bot] Update minify javascript"
+          git commit -m "[bot] Minify javascript source files"
           git push "https://$GITHUB_ACTOR:$GITHUB_TOKEN@github.com/$GITHUB_REPOSITORY.git" `echo $GITHUB_REF | cut -d'/' -f3-`

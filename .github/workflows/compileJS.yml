@@ -2,7 +2,7 @@ name: Minify .js files to .min.js
 on:
   push:
     branches:
-      - upgrade/main
+      - ckan-upgrade-2.8.0a
 
 jobs:
   build:

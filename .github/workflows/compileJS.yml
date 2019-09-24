@@ -14,7 +14,8 @@ jobs:
         uses: NaturalHistoryMuseum/compile-frontend-actions/js@v1.1.0
         id: js
         with:
-          target: '{ckan/public/base/javascript/**/*.js,ckanext/reclineview/theme/public/recline_view.js}'
+          target: '{ckan/public/base/javascript/**/*.js,ckanext/reclineview/theme/public/*.js}'
+
       - name: Commit changes and push
         if: steps.js.outputs.modified != '[]'
         env:

@@ -1,3 +1,5 @@
+# encoding: utf-8
+
 '''
 Provides plugin services to the CKAN
 '''
@@ -10,8 +12,12 @@ from pyutilib.component.core import ExtensionPoint as PluginImplementations
 from pyutilib.component.core import SingletonPlugin as _pca_SingletonPlugin
 from pyutilib.component.core import Plugin as _pca_Plugin
 from paste.deploy.converters import asbool
+from six import string_types
 
 import interfaces
+
+from ckan.common import config
+
 
 __all__ = [
     'PluginImplementations', 'implements',
@@ -116,7 +122,7 @@ def plugins_update():
     environment.update_config()
 
 
-def load_all(config):
+def load_all():
     '''
     Load all plugins listed in the 'ckan.plugins' config directive.
     '''
@@ -138,7 +144,6 @@ def load(*plugins):
     '''
     Load named plugin(s).
     '''
-
     output = []
 
     observers = PluginImplementations(interfaces.IPluginObserver)
@@ -152,10 +157,6 @@ def load(*plugins):
         service.activate()
         for observer_plugin in observers:
             observer_plugin.after_load(service)
-
-        if interfaces.IGenshiStreamFilter in service.__interfaces__:
-            log.warn("Plugin '%s' is using deprecated interface "
-                     'IGenshiStreamFilter' % plugin)
 
         _PLUGINS.append(plugin)
         _PLUGINS_CLASS.append(service.__class__)
@@ -244,7 +245,7 @@ def _get_service(plugin_name):
     :return: the service object
     '''
 
-    if isinstance(plugin_name, basestring):
+    if isinstance(plugin_name, string_types):
         for group in GROUPS:
             iterator = iter_entry_points(
                 group=group,

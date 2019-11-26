@@ -1,6 +1,10 @@
+# encoding: utf-8
+
 import logging
 from collections import defaultdict
 import datetime
+
+from six import string_types, text_type
 
 import ckan.model as model
 
@@ -19,6 +23,7 @@ class CreateTestData(object):
     pkg_core_fields = ['name', 'title', 'version', 'url', 'notes',
                        'author', 'author_email',
                        'maintainer', 'maintainer_email',
+                       'private',
                        ]
     @classmethod
     def create_basic_test_data(cls):
@@ -132,19 +137,14 @@ class CreateTestData(object):
 
     @classmethod
     def create_arbitrary(cls, package_dicts, relationships=[],
-            extra_user_names=[], extra_group_names=[],
-            admins=[]):
+            extra_user_names=[], extra_group_names=[]):
         '''Creates packages and a few extra objects as well at the
         same time if required.
         @param package_dicts - a list of dictionaries with the package
                                properties.
                                Extra keys allowed:
-                               "admins" - list of user names to make admin
-                                          for this package.
         @param extra_group_names - a list of group names to create. No
                                properties get set though.
-        @param admins - a list of user names to make admins of all the
-                               packages created.
         '''
         assert isinstance(relationships, (list, tuple))
         assert isinstance(extra_user_names, (list, tuple))
@@ -154,8 +154,6 @@ class CreateTestData(object):
         new_group_names = set()
         new_groups = {}
 
-
-        admins_list = defaultdict(list) # package_name: admin_names
         if package_dicts:
             if isinstance(package_dicts, dict):
                 package_dicts = [package_dicts]
@@ -166,7 +164,7 @@ class CreateTestData(object):
                 pkg_dict = {}
                 for field in cls.pkg_core_fields:
                     if item.has_key(field):
-                        pkg_dict[field] = unicode(item[field])
+                        pkg_dict[field] = text_type(item[field])
                 if model.Package.by_name(pkg_dict['name']):
                     log.warning('Cannot create package "%s" as it already exists.' % \
                                     (pkg_dict['name']))
@@ -175,13 +173,13 @@ class CreateTestData(object):
                 model.Session.add(pkg)
                 for attr, val in item.items():
                     if isinstance(val, str):
-                        val = unicode(val)
+                        val = text_type(val)
                     if attr=='name':
                         continue
                     if attr in cls.pkg_core_fields:
                         pass
                     elif attr == 'download_url':
-                        pkg.add_resource(unicode(val))
+                        pkg.add_resource(text_type(val))
                     elif attr == 'resources':
                         assert isinstance(val, (list, tuple))
                         for res_dict in val:
@@ -189,19 +187,19 @@ class CreateTestData(object):
                             for k, v in res_dict.items():
                                 if k != 'extras':
                                     if not isinstance(v, datetime.datetime):
-                                        v = unicode(v)
+                                        v = text_type(v)
                                     non_extras[str(k)] = v
-                            extras = dict([(str(k), unicode(v)) for k, v in res_dict.get('extras', {}).items()])
+                            extras = {str(k): text_type(v) for k, v in res_dict.get('extras', {}).items()}
                             pkg.add_resource(extras=extras, **non_extras)
                     elif attr == 'tags':
-                        if isinstance(val, (str, unicode)):
+                        if isinstance(val, string_types):
                             tags = val.split()
                         elif isinstance(val, list):
                             tags = val
                         else:
                             raise NotImplementedError
                         for tag_name in tags:
-                            tag_name = unicode(tag_name)
+                            tag_name = text_type(tag_name)
                             tag = model.Tag.by_name(tag_name)
                             if not tag:
                                 tag = model.Tag(name=tag_name)
@@ -211,18 +209,18 @@ class CreateTestData(object):
                             model.Session.flush()
                     elif attr == 'groups':
                         model.Session.flush()
-                        if isinstance(val, (str, unicode)):
+                        if isinstance(val, string_types):
                             group_names = val.split()
                         elif isinstance(val, list):
                             group_names = val
                         else:
                             raise NotImplementedError
                         for group_name in group_names:
-                            group = model.Group.by_name(unicode(group_name))
+                            group = model.Group.by_name(text_type(group_name))
                             if not group:
                                 if not group_name in new_groups:
                                     group = model.Group(name=
-                                                        unicode(group_name))
+                                                        text_type(group_name))
                                     model.Session.add(group)
                                     new_group_names.add(group_name)
                                     new_groups[group_name] = group
@@ -248,24 +246,17 @@ class CreateTestData(object):
                     elif attr == 'extras':
                         pkg.extras = val
                     elif attr == 'admins':
-                        assert isinstance(val, list)
-                        admins_list[item['name']].extend(val)
-                        for user_name in val:
-                            if user_name not in new_user_names:
-                                new_user_names.append(user_name)
+                        assert 0, 'Deprecated param "admins"'
                     else:
                         raise NotImplementedError(attr)
                 cls.pkg_names.append(item['name'])
-                model.setup_default_user_roles(pkg, admins=[])
-                for admin in admins:
-                    admins_list[item['name']].append(admin)
                 model.repo.commit_and_remove()
 
         needs_commit = False
 
         rev = model.repo.new_revision()
         for group_name in extra_group_names:
-            group = model.Group(name=unicode(group_name))
+            group = model.Group(name=text_type(group_name))
             model.Session.add(group)
             new_group_names.add(group_name)
             needs_commit = True
@@ -276,8 +267,8 @@ class CreateTestData(object):
 
         # create users that have been identified as being needed
         for user_name in new_user_names:
-            if not model.User.by_name(unicode(user_name)):
-                user = model.User(name=unicode(user_name))
+            if not model.User.by_name(text_type(user_name)):
+                user = model.User(name=text_type(user_name))
                 model.Session.add(user)
                 cls.user_refs.append(user_name)
                 needs_commit = True
@@ -286,24 +277,9 @@ class CreateTestData(object):
             model.repo.commit_and_remove()
             needs_commit = False
 
-        # setup authz for admins
-        for pkg_name, admins in admins_list.items():
-            pkg = model.Package.by_name(unicode(pkg_name))
-            admins_obj_list = []
-            for admin in admins:
-                if isinstance(admin, model.User):
-                    admin_obj = admin
-                else:
-                    admin_obj = model.User.by_name(unicode(admin))
-                assert admin_obj, admin
-                admins_obj_list.append(admin_obj)
-            model.setup_default_user_roles(pkg, admins_obj_list)
-            needs_commit = True
-
         # setup authz for groups just created
         for group_name in new_group_names:
-            group = model.Group.by_name(unicode(group_name))
-            model.setup_default_user_roles(group)
+            group = model.Group.by_name(text_type(group_name))
             cls.group_names.add(group_name)
             needs_commit = True
 
@@ -317,10 +293,10 @@ class CreateTestData(object):
             rev.message = u'Creating package relationships.'
 
             def pkg(pkg_name):
-                return model.Package.by_name(unicode(pkg_name))
+                return model.Package.by_name(text_type(pkg_name))
             for subject_name, relationship, object_name in relationships:
                 pkg(subject_name).add_relationship(
-                    unicode(relationship), pkg(object_name))
+                    text_type(relationship), pkg(object_name))
                 needs_commit = True
 
             model.repo.commit_and_remove()
@@ -341,12 +317,12 @@ class CreateTestData(object):
         group_attributes = set(('name', 'title', 'description', 'parent_id',
                                 'type', 'is_organization'))
         for group_dict in group_dicts:
-            if model.Group.by_name(unicode(group_dict['name'])):
+            if model.Group.by_name(text_type(group_dict['name'])):
                 log.warning('Cannot create group "%s" as it already exists.' %
                             group_dict['name'])
                 continue
             pkg_names = group_dict.pop('packages', [])
-            group = model.Group(name=unicode(group_dict['name']))
+            group = model.Group(name=text_type(group_dict['name']))
             group.type = auth_profile or 'group'
             for key in group_dict:
                 if key in group_attributes:
@@ -355,7 +331,7 @@ class CreateTestData(object):
                     group.extras[key] = group_dict[key]
             assert isinstance(pkg_names, (list, tuple))
             for pkg_name in pkg_names:
-                pkg = model.Package.by_name(unicode(pkg_name))
+                pkg = model.Package.by_name(text_type(pkg_name))
                 assert pkg, pkg_name
                 member = model.Member(group=group, table_id=pkg.id,
                                       table_name='package')
@@ -384,12 +360,11 @@ class CreateTestData(object):
             rev.author = cls.author
             # add it to a parent's group
             if 'parent' in group_dict:
-                parent = model.Group.by_name(unicode(group_dict['parent']))
+                parent = model.Group.by_name(text_type(group_dict['parent']))
                 assert parent, group_dict['parent']
                 member = model.Member(group=group, table_id=parent.id,
                                       table_name='group', capacity='parent')
                 model.Session.add(member)
-            #model.setup_default_user_roles(group, admin_users)
             cls.group_names.add(group_dict['name'])
         model.repo.commit_and_remove()
 
@@ -415,7 +390,7 @@ class CreateTestData(object):
         model.Session.add(pkg1)
         pkg1.title = u'A Novel By Tolstoy'
         pkg1.version = u'0.7a'
-        pkg1.url = u'http://www.annakarenina.com'
+        pkg1.url = u'http://datahub.io'
         # put an & in the url string to test escaping
         if 'alt_url' in model.Resource.get_extra_columns():
             configured_extras = ({'alt_url': u'alt123'},
@@ -423,7 +398,7 @@ class CreateTestData(object):
         else:
             configured_extras = ({}, {})
         pr1 = model.Resource(
-            url=u'http://www.annakarenina.com/download/x=1&y=2',
+            url=u'http://datahub.io/download/x=1&y=2',
             format=u'plain text',
             description=u'Full text. Needs escaping: " Umlaut: \xfc',
             hash=u'abc123',
@@ -431,7 +406,7 @@ class CreateTestData(object):
             **configured_extras[0]
             )
         pr2 = model.Resource(
-            url=u'http://www.annakarenina.com/index.json',
+            url=u'http://datahub.io/index.json',
             format=u'JSON',
             description=u'Index of the novel',
             hash=u'def456',
@@ -440,8 +415,8 @@ class CreateTestData(object):
             )
         model.Session.add(pr1)
         model.Session.add(pr2)
-        pkg1.resource_groups_all[0].resources_all.append(pr1)
-        pkg1.resource_groups_all[0].resources_all.append(pr2)
+        pkg1.resources_all.append(pr1)
+        pkg1.resources_all.append(pr2)
         pkg1.notes = u'''Some test notes
 
 ### A 3rd level heading
@@ -491,6 +466,7 @@ left arrow <
                              title=u'Roger\'s books',
                              description=u'Roger likes these books.',
                              type=auth_profile or 'group')
+
         for obj in [david, roger]:
             model.Session.add(obj)
 
@@ -508,29 +484,11 @@ left arrow <
         model.Session.add_all([
             model.User(name=u'tester', apikey=u'tester', password=u'tester'),
             model.User(name=u'joeadmin', password=u'joeadmin'),
-            model.User(name=u'annafan', about=u'I love reading Annakarenina. My site: http://anna.com', password=u'annafan'),
+            model.User(name=u'annafan', about=u'I love reading Annakarenina. My site: http://datahub.io', password=u'annafan'),
             model.User(name=u'russianfan', password=u'russianfan'),
             sysadmin,
             ])
         cls.user_refs.extend([u'tester', u'joeadmin', u'annafan', u'russianfan', u'testsysadmin'])
-        model.repo.commit_and_remove()
-
-        visitor = model.User.by_name(model.PSEUDO_USER__VISITOR)
-        anna = model.Package.by_name(u'annakarenina')
-        war = model.Package.by_name(u'warandpeace')
-        annafan = model.User.by_name(u'annafan')
-        russianfan = model.User.by_name(u'russianfan')
-        model.setup_default_user_roles(anna, [annafan])
-        model.setup_default_user_roles(war, [russianfan])
-        model.add_user_to_role(visitor, model.Role.ADMIN, war)
-        david = model.Group.by_name(u'david')
-        roger = model.Group.by_name(u'roger')
-        model.setup_default_user_roles(david, [russianfan])
-        model.setup_default_user_roles(roger, [russianfan])
-
-        # in new_authz you can't give a visitor permissions to a
-        # group it seems, so this is a bit meaningless
-        model.add_user_to_role(visitor, model.Role.ADMIN, roger)
         model.repo.commit_and_remove()
 
     # method used in DGU and all good tests elsewhere
@@ -546,20 +504,18 @@ left arrow <
 
     @classmethod
     def _create_user_without_commit(cls, name='', **user_dict):
-        if model.User.by_name(name) or \
-                (user_dict.get('open_id') and
-                 model.User.by_openid(user_dict.get('openid'))):
+        if model.User.by_name(name):
             log.warning('Cannot create user "%s" as it already exists.' %
                         name or user_dict['name'])
             return
         # User objects are not revisioned so no need to create a revision
-        user_ref = name or user_dict['openid']
+        user_ref = name
         assert user_ref
         for k, v in user_dict.items():
             if v:
                 # avoid unicode warnings
-                user_dict[k] = unicode(v)
-        user = model.User(name=unicode(name), **user_dict)
+                user_dict[k] = text_type(v)
+        user = model.User(name=text_type(name), **user_dict)
         model.Session.add(user)
         cls.user_refs.append(user_ref)
         return user
@@ -576,7 +532,7 @@ left arrow <
         '''If you create a domain object manually in your test then you
         can name it here (flag it up) and it will be deleted when you next
         call CreateTestData.delete().'''
-        if isinstance(pkg_names, basestring):
+        if isinstance(pkg_names, string_types):
             pkg_names = [pkg_names]
         cls.pkg_names.extend(pkg_names)
         cls.tag_names.extend(tag_names)
@@ -588,15 +544,15 @@ left arrow <
         '''Purges packages etc. that were created by this class.'''
         for pkg_name in cls.pkg_names:
             model.Session().autoflush = False
-            pkg = model.Package.by_name(unicode(pkg_name))
+            pkg = model.Package.by_name(text_type(pkg_name))
             if pkg:
                 pkg.purge()
         for tag_name in cls.tag_names:
-            tag = model.Tag.by_name(unicode(tag_name))
+            tag = model.Tag.by_name(text_type(tag_name))
             if tag:
                 tag.purge()
         for group_name in cls.group_names:
-            group = model.Group.by_name(unicode(group_name))
+            group = model.Group.by_name(text_type(group_name))
             if group:
                 model.Session.delete(group)
         revs = model.Session.query(model.Revision).filter_by(author=cls.author)
@@ -608,7 +564,7 @@ left arrow <
             model.Session.commit()
             model.Session.delete(rev)
         for user_name in cls.user_refs:
-            user = model.User.get(unicode(user_name))
+            user = model.User.get(text_type(user_name))
             if user:
                 user.purge()
         model.Session.commit()
@@ -694,7 +650,7 @@ search_items = [{'name':'gils',
               'tags':'registry,country-usa,government,federal,gov,workshop-20081101,penguin'.split(','),
               'resources':[{'url':'http://www.dcsf.gov.uk/rsgateway/DB/SFR/s000859/SFR17_2009_tables.xls',
                           'format':'XLS',
-                          'last_modified': datetime.datetime(2005,10,01),
+                          'last_modified': datetime.datetime(2005, 10, 1),
                           'description':'December 2009 | http://www.statistics.gov.uk/hub/id/119-36345'},
                           {'url':'http://www.dcsf.gov.uk/rsgateway/DB/SFR/s000860/SFR17_2009_key.doc',
                           'format':'DOC',

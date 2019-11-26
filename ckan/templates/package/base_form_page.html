@@ -5,7 +5,12 @@
     {% block page_header %}{% endblock %}
     <div class="module-content">
       {% block primary_content_inner %}
-        {% block form %}{{ c.form | safe }}{% endblock %}
+        {% block form %}
+          {#- passing c to a snippet is bad but is required here
+              for backwards compatibility with old templates and
+              plugins using setup_template_variables() -#}
+          {{- h.snippet(form_snippet, pkg_dict=pkg_dict, **form_vars) -}}
+        {% endblock %}
       {% endblock %}
     </div>
   </section>
@@ -14,7 +19,7 @@
 {% block secondary_content %}
   {% block info_module %}
     <section class="module module-narrow module-shallow">
-      <h2 class="module-heading"><i class="icon-info-sign"></i> {{ _('What are datasets?') }}</h2>
+      <h2 class="module-heading"><i class="fa fa-info-circle"></i> {{ _('What are datasets?') }}</h2>
       <div class="module-content">
         <p>
           {% trans %}

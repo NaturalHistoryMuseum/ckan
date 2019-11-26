@@ -11,6 +11,7 @@ installing, upgrading and configuring CKAN and its features and extensions.
    installing/index
    upgrading/index
    getting-started
+   database-management
    paster
    authorization
    data-viewer
@@ -26,5 +27,3 @@ installing, upgrading and configuring CKAN and its features and extensions.
    multilingual
    stats
    configuration
-
-   solr-multicore

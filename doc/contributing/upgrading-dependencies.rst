@@ -12,7 +12,7 @@ requirements.in
   This file is only used to create a new version of the ``requirements.txt``
   file when upgrading the dependencies.
   Contains our direct dependencies only (not dependencies of dependencies)
-  with loosely defined versions. For example, ``apachemiddleware>=0.1.1,<0.2``.
+  with loosely defined versions. For example, ``python-dateutil>=1.5.0,<2.0.0``.
 
 requirements.txt
   This is the file that people actually use to install CKAN's dependencies into
@@ -60,4 +60,4 @@ work with CKAN:
 
 #. Navigate a bit on CKAN to make sure the tests didn't miss anything. Review
    the dependencies changes and their changelogs. If everything seems fine, go
-   ahead and make a pull request (see :doc`/contributing/pull-requests`).
+   ahead and make a pull request (see :doc:`/contributing/pull-requests`).

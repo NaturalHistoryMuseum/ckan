@@ -41,7 +41,7 @@ A module can be created by calling ``ckan.module()``:
 
 ::
 
-    ckan.module('favorite', function (jQuery, _) {
+    ckan.module('favorite', function (jQuery) {
       return {};
     });
 
@@ -62,7 +62,7 @@ your module and if present calls the ``.initialize()`` method.
 
 ::
 
-    ckan.module('favorite', function (jQuery, _) {
+    ckan.module('favorite', function (jQuery) {
       return {
         initialize: function () {
           console.log('I've been called for element: %o', this.el);
@@ -106,34 +106,30 @@ functionality elsewhere.
       this.sandbox.client.favoriteDataset(this.button.val());
     }
 
-Notifications and Internationalisation
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Internationalisation
+~~~~~~~~~~~~~~~~~~~~
+See :ref:`javascript_i18n`.
+
+
+Notifications
+~~~~~~~~~~~~~
 
 This submits the dataset to the API but ideally we want to tell the user
 what we're doing.
 
-::
+.. code-block:: javascript
 
-    options: {
-      i18n: {
-        loading: _('Favouriting dataset'),
-        done: _('Favourited dataset %(id)s')
-      }
-    },
     favorite: function () {
-      // i18n gets a translation key from the options object.
-      this.button.text(this.i18n('loading'));
+      this.button.text('Loading');
 
       // The client on the sandbox should always be used to talk to the api.
       var request = this.sandbox.client.favoriteDataset(this.button.val())
       request.done(jQuery.proxy(this._onSuccess, this));
     },
     _onSuccess: function () {
-      // We can perform interpolation on messages.
-      var message = this.i18n('done', {id: this.button.val()});
-
       // Notify allows global messages to be displayed to the user.
-      this.sandbox.notify(message, 'success');
+      this.sandbox.notify('Done', 'success');
     }
 
 Options
@@ -150,11 +146,10 @@ This will override the defaults in the options object.
 
 ::
 
-    ckan.module('favorite', function (jQuery, _) {
+    ckan.module('favorite', function (jQuery) {
       return {
         options: {
-          dataset: '',
-          i18n: {...}
+          dataset: ''
         }
         initialize: function () {
           console.log('this dataset is: %s', this.options.dataset);
@@ -179,10 +174,8 @@ the user if the request fails. Again we can use
       request.fail(jQuery.proxy(this._onError, this));
     },
     _onError: function () {
-      var message = this.i18n('error', {id: this.button.val()});
-
       // Notify allows global messages to be displayed to the user.
-      this.sandbox.notify(message, 'error');
+      this.sandbox.notify('An error occurred!', 'error');
     }
 
 Module Scope
@@ -234,7 +227,7 @@ Now in our other module 'user-favorite-counter' we can listen for this.
 
 ::
 
-    ckan.module('user-favorite-counter', function (jQuery, _) {
+    ckan.module('user-favorite-counter', function (jQuery) {
       return {
         initialize: function () {
           jQuery.proxyAll(this, /_on/);

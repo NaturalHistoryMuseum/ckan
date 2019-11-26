@@ -1,7 +1,9 @@
+# encoding: utf-8
+
 import datetime
 
 from paste.deploy.converters import asbool
-from pylons import config
+from ckan.common import config
 """SQLAlchemy Metadata and Session object"""
 from sqlalchemy import MetaData, and_
 import sqlalchemy.orm as orm
@@ -21,13 +23,6 @@ class CkanCacheExtension(SessionExtension):
 
     def __init__(self, *args, **kw):
         super(CkanCacheExtension, self).__init__(*args, **kw)
-        # Setup Redis support if needed.
-        self.use_redis = asbool(config.get('ckan.page_cache_enabled'))
-        if self.use_redis:
-            import redis
-            self.redis = redis
-            self.redis_connection is None
-            self.redis_exception = redis.exceptions.ConnectionError
 
     def after_commit(self, session):
         if hasattr(session, '_object_cache'):
@@ -39,17 +34,6 @@ class CkanCacheExtension(SessionExtension):
             for item in oc_list:
                 objs.add(item.__class__.__name__)
 
-        # Flush Redis
-        if self.use_redis:
-            if self.redis_connection is None:
-                try:
-                    self.redis_connection = self.redis.StrictRedis()
-                except self.redis_exception:
-                    pass
-            try:
-                self.redis_connection.flushdb()
-            except self.redis_exception:
-                pass
 
 class CkanSessionExtension(SessionExtension):
 
@@ -59,7 +43,7 @@ class CkanSessionExtension(SessionExtension):
                                     'deleted': set(),
                                     'changed': set()}
 
-        changed = [obj for obj in session.dirty if 
+        changed = [obj for obj in session.dirty if
             session.is_modified(obj, include_collections=False, passive=True)]
 
         session._object_cache['new'].update(session.new)
@@ -85,14 +69,14 @@ class CkanSessionExtension(SessionExtension):
             revision_cls = obj.__revision_class__
             revision_table = orm.class_mapper(revision_cls).mapped_table
             ## when a normal active transaction happens
-            if 'pending' not in obj.state:
-                ### this is asql statement as we do not want it in object cache
-                session.execute(
-                    revision_table.update().where(
-                        and_(revision_table.c.id == obj.id,
-                             revision_table.c.current == '1')
-                    ).values(current='0')
-                )
+
+            ### this is an sql statement as we do not want it in object cache
+            session.execute(
+                revision_table.update().where(
+                    and_(revision_table.c.id == obj.id,
+                         revision_table.c.current == '1')
+                ).values(current='0')
+            )
 
             q = session.query(revision_cls)
             q = q.filter_by(expired_timestamp=datetime.datetime(9999, 12, 31), id=obj.id)
@@ -101,10 +85,7 @@ class CkanSessionExtension(SessionExtension):
                 values = {}
                 if rev_obj.revision_id == revision.id:
                     values['revision_timestamp'] = revision.timestamp
-                    if 'pending' not in obj.state:
-                        values['current'] = '1'
                 else:
-                    values['expired_id'] = revision.id
                     values['expired_timestamp'] = revision.timestamp
                 session.execute(
                     revision_table.update().where(

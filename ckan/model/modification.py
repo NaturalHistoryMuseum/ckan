@@ -1,13 +1,23 @@
+# encoding: utf-8
+
 import logging
 
+from sqlalchemy.orm.exc import UnmappedInstanceError
+
+from ckan.lib.search import SearchIndexError
+from ckan.common import g
+
 import ckan.plugins as plugins
-import domain_object
-import package as _package
-import resource
+import ckan.model as model
+
+domain_object = model.domain_object
+_package = model.package
+resource = model.resource
 
 log = logging.getLogger(__name__)
 
 __all__ = ['DomainObjectModificationExtension']
+
 
 class DomainObjectModificationExtension(plugins.SingletonPlugin):
     """
@@ -19,20 +29,13 @@ class DomainObjectModificationExtension(plugins.SingletonPlugin):
 
     plugins.implements(plugins.ISession, inherit=True)
 
-    def notify_observers(self, func):
-        """
-        Call func(observer) for all registered observers.
-
-        :param func: Any callable, which will be called for each observer
-        :returns: EXT_CONTINUE if no errors encountered, otherwise EXT_STOP
-        """
-        for observer in plugins.PluginImplementations(
-                plugins.IDomainObjectModification):
-            func(observer)
-
-
     def before_commit(self, session):
+        self.notify_observers(session, self.notify)
 
+    def after_commit(self, session):
+        pass
+
+    def notify_observers(self, session, method):
         session.flush()
         if not hasattr(session, '_object_cache'):
             return
@@ -44,18 +47,19 @@ class DomainObjectModificationExtension(plugins.SingletonPlugin):
 
         for obj in set(new):
             if isinstance(obj, (_package.Package, resource.Resource)):
-                self.notify(obj, domain_object.DomainObjectOperation.new)
+                method(obj, domain_object.DomainObjectOperation.new)
         for obj in set(deleted):
             if isinstance(obj, (_package.Package, resource.Resource)):
-                self.notify(obj, domain_object.DomainObjectOperation.deleted)
+                method(obj, domain_object.DomainObjectOperation.deleted)
         for obj in set(changed):
             if isinstance(obj, resource.Resource):
-                self.notify(obj, domain_object.DomainObjectOperation.changed)
+                method(obj, domain_object.DomainObjectOperation.changed)
             if getattr(obj, 'url_changed', False):
                 for item in plugins.PluginImplementations(plugins.IResourceUrlChange):
                     item.notify(obj)
 
-        changed_pkgs = set(obj for obj in changed if isinstance(obj, _package.Package))
+        changed_pkgs = set(obj for obj in changed
+                           if isinstance(obj, _package.Package))
 
         for obj in new | changed | deleted:
             if not isinstance(obj, _package.Package):
@@ -69,16 +73,31 @@ class DomainObjectModificationExtension(plugins.SingletonPlugin):
                     if package and package not in deleted | new:
                         changed_pkgs.add(package)
         for obj in changed_pkgs:
-            self.notify(obj, domain_object.DomainObjectOperation.changed)
-
+            method(obj, domain_object.DomainObjectOperation.changed)
 
     def notify(self, entity, operation):
         for observer in plugins.PluginImplementations(
                 plugins.IDomainObjectModification):
             try:
                 observer.notify(entity, operation)
-            except Exception, ex:
-                log.exception(ex)
-                # We reraise all exceptions so they are obvious there
-                # is something wrong
+            except SearchIndexError as search_error:
+                log.exception(search_error)
+
+                # userobj must be available inside rendered error template,
+                # though it become unbounded after session rollback because
+                # of this error. Expunge will prevent `UnboundedInstanceError`
+                # raised from error template.
+                try:
+                    model.Session.expunge(g.userobj)
+                # AttributeError - there is no such prop in `g`
+                # UnmappedInstanceError - g.userobj is None or empty string.
+                except (AttributeError, UnmappedInstanceError):
+                    pass
+
+                # Reraise, since it's pretty crucial to ckan if it can't index
+                # a dataset
                 raise
+            except Exception as ex:
+                log.exception(ex)
+                # Don't reraise other exceptions since they are generally of
+                # secondary importance so shouldn't disrupt the commit.

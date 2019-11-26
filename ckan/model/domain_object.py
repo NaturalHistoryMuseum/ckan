@@ -1,3 +1,5 @@
+# encoding: utf-8
+
 import datetime
 
 import sqlalchemy as sa
@@ -36,7 +38,7 @@ class DomainObject(object):
 
     @classmethod
     def count(cls):
-        cls.Session.query(cls).count()
+        return cls.Session.query(cls).count()
 
     @classmethod
     def by_name(cls, name, autoflush=True):
@@ -76,15 +78,12 @@ class DomainObject(object):
         self.Session.remove()
 
     def delete(self):
+        # stateful objects have this method overridden - see
+        # vmd.base.StatefulObjectMixin
         self.Session.delete(self)
 
     def purge(self):
         self.Session().autoflush = False
-        if hasattr(self, '__revisioned__'): # only for versioned objects ...
-            # this actually should auto occur due to cascade relationships but
-            # ...
-            for rev in self.all_revisions:
-                self.Session.delete(rev)
         self.Session.delete(self)
 
     def as_dict(self):
@@ -108,7 +107,7 @@ class DomainObject(object):
         for col in table.c:
             try:
                 repr += u' %s=%s' % (col.name, getattr(self, col.name))
-            except Exception, inst:
+            except Exception as inst:
                 repr += u' %s=%s' % (col.name, inst)
 
         repr += '>'

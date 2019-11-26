@@ -1,18 +1,25 @@
-from pylons import config
+# encoding: utf-8
+
+from ckan.common import config
 
 import ckan.lib.base as base
 import ckan.lib.helpers as h
 import ckan.lib.app_globals as app_globals
+import ckan.lib.navl.dictization_functions as dict_fns
 import ckan.model as model
 import ckan.logic as logic
-import ckan.new_authz
+import ckan.plugins as plugins
+from home import CACHE_PARAMETERS
+
 
 c = base.c
 request = base.request
 _ = base._
 
+
 def get_sysadmins():
-    q = model.Session.query(model.User).filter(model.User.sysadmin==True)
+    q = model.Session.query(model.User).filter(model.User.sysadmin == True,
+                                               model.User.state == 'active')
     return q.all()
 
 
@@ -24,7 +31,7 @@ class AdminController(base.BaseController):
         try:
             logic.check_access('sysadmin', context, {})
         except logic.NotAuthorized:
-            base.abort(401, _('Need to be system administrator to administer'))
+            base.abort(403, _('Need to be system administrator to administer'))
         c.revision_change_state_allowed = True
 
     def _get_config_form_items(self):
@@ -43,7 +50,8 @@ class AdminController(base.BaseController):
             {'name': 'ckan.site_title', 'control': 'input', 'label': _('Site Title'), 'placeholder': ''},
             {'name': 'ckan.main_css', 'control': 'select', 'options': styles, 'label': _('Style'), 'placeholder': ''},
             {'name': 'ckan.site_description', 'control': 'input', 'label': _('Site Tag Line'), 'placeholder': ''},
-            {'name': 'ckan.site_logo', 'control': 'input', 'label': _('Site Tag Logo'), 'placeholder': ''},
+            {'name': 'ckan.site_logo', 'control': 'image_upload', 'label': _('Site Tag Logo'), 'placeholder': '', 'upload_enabled':h.uploads_enabled(),
+                'field_url': 'ckan.site_logo', 'field_upload': 'logo_upload', 'field_clear': 'clear_logo_upload'},
             {'name': 'ckan.site_about', 'control': 'markdown', 'label': _('About'), 'placeholder': _('About page text')},
             {'name': 'ckan.site_intro_text', 'control': 'markdown', 'label': _('Intro Text'), 'placeholder': _('Text on home page')},
             {'name': 'ckan.site_custom_css', 'control': 'textarea', 'label': _('Custom CSS'), 'placeholder': _('Customisable css inserted into the page header')},
@@ -52,6 +60,15 @@ class AdminController(base.BaseController):
         return items
 
     def reset_config(self):
+        '''FIXME: This method is probably not doing what people would expect.
+           It will reset the configuration to values cached when CKAN started.
+           If these were coming from the database during startup, that's the
+           ones that will get applied on reset, not the ones in the ini file.
+           Only after restarting the server and having CKAN reset the values
+           from the ini file (as the db ones are not there anymore) will these
+           be used.
+        '''
+
         if 'cancel' in request.params:
             h.redirect_to(controller='admin', action='config')
 
@@ -59,7 +76,7 @@ class AdminController(base.BaseController):
             # remove sys info items
             for item in self._get_config_form_items():
                 name = item['name']
-                app_globals.delete_global(name)
+                model.delete_system_info(name)
             # reset to values in config
             app_globals.reset()
             h.redirect_to(controller='admin', action='config')
@@ -71,22 +88,35 @@ class AdminController(base.BaseController):
         items = self._get_config_form_items()
         data = request.POST
         if 'save' in data:
-            # update config from form
-            for item in items:
-                name = item['name']
-                if name in data:
-                    app_globals.set_global(name, data[name])
-            app_globals.reset()
+            try:
+                # really?
+                data_dict = logic.clean_dict(
+                    dict_fns.unflatten(
+                        logic.tuplize_dict(
+                            logic.parse_params(
+                                request.POST, ignore_keys=CACHE_PARAMETERS))))
+
+                del data_dict['save']
+
+                data = logic.get_action('config_option_update')(
+                    {'user': c.user}, data_dict)
+            except logic.ValidationError as e:
+                errors = e.error_dict
+                error_summary = e.error_summary
+                vars = {'data': data, 'errors': errors,
+                        'error_summary': error_summary, 'form_items': items}
+                return base.render('admin/config.html', extra_vars=vars)
+
             h.redirect_to(controller='admin', action='config')
 
+        schema = logic.schema.update_configuration_schema()
         data = {}
-        for item in items:
-            name = item['name']
-            data[name] = config.get(name)
+        for key in schema:
+            data[key] = config.get(key)
 
         vars = {'data': data, 'errors': {}, 'form_items': items}
         return base.render('admin/config.html',
-                           extra_vars = vars)
+                           extra_vars=vars)
 
     def index(self):
         #now pass the list of sysadmins
@@ -149,7 +179,7 @@ class AdminController(base.BaseController):
                         # page Ensure that whatever 'head' pointer is used
                         # gets moved down to the next revision
                         model.repo.purge_revision(revision, leave_record=False)
-                    except Exception, inst:
+                    except Exception as inst:
                         msg = _('Problem purging revision %s: %s') % (id, inst)
                         msgs.append(msg)
                 h.flash_success(_('Purge complete'))

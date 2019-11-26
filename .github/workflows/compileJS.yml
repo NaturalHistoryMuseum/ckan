@@ -1,0 +1,30 @@
+name: Minify .js files to .min.js
+on:
+  push:
+    branches:
+      - ckan-upgrade-2.8.0a
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v1
+
+      - name: Minify js
+        uses: NaturalHistoryMuseum/compile-frontend-actions/js@v1.1.0
+        id: js
+        with:
+          target: '{ckan/public/base/javascript/**/*.js,ckanext/reclineview/theme/public/*.js}'
+
+      - name: Commit changes and push
+        if: steps.js.outputs.modified != '[]'
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          MODIFIED: ${{ steps.js.outputs.modified }}
+        run: |
+          git config user.name "Minify action on behalf of $GITHUB_ACTOR"
+          git config user.email "$GITHUB_ACTOR@users.noreply.github.com"
+          git checkout `echo $GITHUB_REF | cut -d'/' -f3-`
+          git add `echo $MODIFIED | jq -r 'join(" ")'`
+          git commit -m "[bot] Minify javascript source files"
+          git push "https://$GITHUB_ACTOR:$GITHUB_TOKEN@github.com/$GITHUB_REPOSITORY.git" `echo $GITHUB_REF | cut -d'/' -f3-`

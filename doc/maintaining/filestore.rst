@@ -73,7 +73,7 @@ Files can be uploaded to the FileStore using the
 :py:func:`~ckan.logic.action.create.resource_create` and
 :py:func:`~ckan.logic.action.update.resource_update` action API
 functions. You can post multipart/form-data to the API and the key, value
-pairs will treated as as if they are a JSON object.
+pairs will be treated as if they are a JSON object.
 The extra key ``upload`` is used to actually post the binary data.
 
 For example, to create a new CKAN resource and upload a file to it using
@@ -93,7 +93,7 @@ To create a new resource and upload a file to it using the Python library
 
  import requests
  requests.post('http://0.0.0.0:5000/api/action/resource_create',
-               data={"package_id":"my_dataset}",
+               data={"package_id":"my_dataset"},
                headers={"X-CKAN-API-Key": "21a47217-6d7b-49c5-88f9-72ebd5a4d4bb"},
                files=[('upload', file('/path/to/file/to/upload.csv'))])
 
@@ -121,7 +121,7 @@ Migration from 2.1 to 2.2
 If you are using pairtree local file storage then you can keep your current settings
 without issue.  The pairtree and new storage can live side by side but you are still
 encouraged to migrate.  If you change your config options to the ones specified in
-this docs you will need to run the migration below.
+this doc you will need to run the migration below.
 
 If you are running remote storage then all previous links will still be accessible
 but if you want to move the remote storage documents to the local storage you will
@@ -134,7 +134,7 @@ on the command line to do the migration::
     paster db migrate-filestore
 
 This may take a long time especially if you have a lot of files remotely.
-If the remote hosting goes down or the job is interrupted it is save to run it again
+If the remote hosting goes down or the job is interrupted it is saved to run it again
 and it will try all the unsuccessful ones again.
 
 
@@ -149,7 +149,7 @@ an uploaded file. If some particular format is not included in the ones guessed
 by the ``mimetypes`` library, a default ``application/octet-stream`` value will be
 returned.
 
-Users can still register a more appropiate media type by using the ``mimetypes``
+Users can still register a more appropriate media type by using the ``mimetypes``
 library. A good way to do so is to use the ``IConfigurer`` interface so the
 custom types get registered on startup::
 

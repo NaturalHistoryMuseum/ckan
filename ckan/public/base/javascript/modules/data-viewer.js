@@ -37,7 +37,7 @@ this.ckan.module('data-viewer', function (jQuery) {
     },
 
     _recalibrate: function() {
-      var height = this.el.contents().find('body').outerHeight(true);
+      var height = $.makeArray($(this.el.contents().find('body').children()).map((i, e) => $(e).outerHeight(true))).reduce((a,b) => a+b);
       height = Math.max(height, this.options.minHeight);
       this.el.css('height', height + this.options.padding);
     },

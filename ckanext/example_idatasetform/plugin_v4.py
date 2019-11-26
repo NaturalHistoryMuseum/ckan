@@ -1,3 +1,5 @@
+# encoding: utf-8
+
 import ckan.plugins as p
 import ckan.plugins.toolkit as tk
 
@@ -82,7 +84,7 @@ class ExampleIDatasetFormPlugin(p.SingletonPlugin, tk.DefaultDatasetForm):
         # registers itself as the default (above).
         return []
 
-    #update config
+    # update config
     def update_config(self, config):
         # Add this plugin's templates dir to CKAN's extra_template_paths, so
         # that CKAN will use this plugin's custom templates.

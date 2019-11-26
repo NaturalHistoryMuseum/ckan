@@ -24,11 +24,11 @@ respectively.
 
    .. note::
 
-      If you have changed the |apache| or |nginx| configuration files, you will
-      get a prompt like the following, asking whether to keep your local changes
-      or replace the files. You generally would like to keep your local changes
-      (option ``N``, which is the default), but you can look at the differences
-      between versions by selecting option ``D``::
+      If you have changed the |apache|, |nginx| or ``who.ini`` configuration
+      files, you will get a prompt like the following, asking whether to keep
+      your local changes or replace the files. You generally would like to keep
+      your local changes (option ``N``, which is the default), but you can look
+      at the differences between versions by selecting option ``D``::
 
        Configuration file `/etc/apache2/sites-available/ckan_default'
         ==> File on system created by you or by a script.
@@ -55,23 +55,8 @@ respectively.
      you will need to manually reinstall it.
 
 #. If there have been changes in the database schema (check the
-   :doc:`/changelog` to find out) you need to update your CKAN database's
-   schema using the ``db upgrade`` command.
-
-   .. warning ::
-
-     To avoid problems during the database upgrade, comment out any plugins
-     that you have enabled in your ini file. You can uncomment them again when
-     the upgrade finishes.
-
-   For example:
-
-   .. parsed-literal::
-
-    paster db upgrade --config=\ |development.ini|
-
-   See :ref:`paster db` for details of the ``db upgrade``
-   command.
+   :doc:`/changelog` to find out) you need to :ref:`upgrade your database
+   schema <db upgrade>`.
 
 #. If there have been changes in the Solr schema (check the :doc:`/changelog`
    to find out) you need to restart Jetty for the changes to take effect:
@@ -85,6 +70,11 @@ respectively.
    version. Refer to the documentation for each extension. We recommend
    disabling all extensions on your ini file and re-enable them one by one
    to make sure they are working fine.
+
+#. If new configuration options have been introduced (check the
+   :doc:`/changelog` to find out) then check whether you need to change them
+   from their default values. See :doc:`/maintaining/configuration` for
+   details.
 
 #. Rebuild your search index by running the ``ckan search-index rebuild``
    command:

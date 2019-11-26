@@ -1,3 +1,5 @@
+# encoding: utf-8
+
 import logging
 import sys
 import cgitb
@@ -5,7 +7,6 @@ import warnings
 import xml.dom.minidom
 import urllib2
 
-from pylons import config
 from paste.deploy.converters import asbool
 
 import ckan.model as model
@@ -21,7 +22,6 @@ from query import (TagSearchQuery, ResourceSearchQuery, PackageSearchQuery,
 log = logging.getLogger(__name__)
 
 
-
 def text_traceback():
     with warnings.catch_warnings():
         warnings.simplefilter("ignore")
@@ -30,9 +30,8 @@ def text_traceback():
         ).strip()
     return res
 
-SIMPLE_SEARCH = asbool(config.get('ckan.simple_search', False))
 
-SUPPORTED_SCHEMA_VERSIONS = ['2.0']
+SUPPORTED_SCHEMA_VERSIONS = ['2.8']
 
 DEFAULT_OPTIONS = {
     'limit': 20,
@@ -58,11 +57,6 @@ _QUERIES = {
 
 SOLR_SCHEMA_FILE_OFFSET = '/admin/file/?file=schema.xml'
 
-if SIMPLE_SEARCH:
-    import sql as sql
-    _INDICES['package'] = NoopSearchIndex
-    _QUERIES['package'] = sql.PackageSearchQuery
-
 
 def _normalize_type(_type):
     if isinstance(_type, model.domain_object.DomainObject):
@@ -78,7 +72,7 @@ def index_for(_type):
     try:
         _type_n = _normalize_type(_type)
         return _INDICES[_type_n]()
-    except KeyError, ke:
+    except KeyError as ke:
         log.warn("Unknown search type: %s" % _type)
         return NoopSearchIndex()
 
@@ -89,7 +83,7 @@ def query_for(_type):
     try:
         _type_n = _normalize_type(_type)
         return _QUERIES[_type_n]()
-    except KeyError, ke:
+    except KeyError as ke:
         raise SearchError("Unknown search type: %s" % _type)
 
 
@@ -105,7 +99,7 @@ def dispatch_by_operation(entity_type, entity, operation):
             index.remove_dict(entity)
         else:
             log.warn("Unknown operation: %s" % operation)
-    except Exception, ex:
+    except Exception as ex:
         log.exception(ex)
         # we really need to know about any exceptions, so reraise
         # (see #1172)
@@ -135,7 +129,8 @@ class SynchronousSearchPlugin(p.SingletonPlugin):
             log.warn("Discarded Sync. indexing for: %s" % entity)
 
 
-def rebuild(package_id=None, only_missing=False, force=False, refresh=False, defer_commit=False, package_ids=None):
+def rebuild(package_id=None, only_missing=False, force=False, refresh=False,
+            defer_commit=False, package_ids=None, quiet=False):
     '''
         Rebuilds the search index.
 
@@ -165,7 +160,7 @@ def rebuild(package_id=None, only_missing=False, force=False, refresh=False, def
             package_index.update_dict(pkg_dict, True)
     else:
         package_ids = [r[0] for r in model.Session.query(model.Package.id).
-                       filter(model.Package.state == 'active').all()]
+                       filter(model.Package.state != 'deleted').all()]
         if only_missing:
             log.info('Indexing only missing packages...')
             package_query = query_for(model.Package)
@@ -183,7 +178,14 @@ def rebuild(package_id=None, only_missing=False, force=False, refresh=False, def
             if not refresh:
                 package_index.clear()
 
-        for pkg_id in package_ids:
+        total_packages = len(package_ids)
+        for counter, pkg_id in enumerate(package_ids):
+            if not quiet:
+                sys.stdout.write(
+                    "\rIndexing dataset {0}/{1}".format(
+                        counter +1, total_packages)
+                )
+                sys.stdout.flush()
             try:
                 package_index.update_dict(
                     logic.get_action('package_show')(context,
@@ -191,9 +193,9 @@ def rebuild(package_id=None, only_missing=False, force=False, refresh=False, def
                     ),
                     defer_commit
                 )
-            except Exception, e:
-                log.error('Error while indexing dataset %s: %s' %
-                          (pkg_id, str(e)))
+            except Exception as e:
+                log.error(u'Error while indexing dataset %s: %s' %
+                          (pkg_id, repr(e)))
                 if force:
                     log.error(text_traceback())
                     continue
@@ -209,6 +211,7 @@ def commit():
     package_index.commit()
     log.info('Commited pending changes on the search index')
 
+
 def check():
     package_query = query_for(model.Package)
 
@@ -218,11 +221,11 @@ def check():
     pkgs = set([pkg.id for pkg in pkgs_q])
     indexed_pkgs = set(package_query.get_all_entity_ids(max_results=len(pkgs)))
     pkgs_not_indexed = pkgs - indexed_pkgs
-    print 'Packages not indexed = %i out of %i' % (len(pkgs_not_indexed),
-                                                   len(pkgs))
+    print('Packages not indexed = %i out of %i' % (len(pkgs_not_indexed),
+                                                   len(pkgs)))
     for pkg_id in pkgs_not_indexed:
         pkg = model.Session.query(model.Package).get(pkg_id)
-        print pkg.revision.timestamp.strftime('%Y-%m-%d'), pkg.name
+        print(pkg.revision.timestamp.strftime('%Y-%m-%d'), pkg.name)
 
 
 def show(package_reference):
@@ -231,15 +234,17 @@ def show(package_reference):
     return package_query.get_index(package_reference)
 
 
-def clear(package_reference=None):
+def clear(package_reference):
     package_index = index_for(model.Package)
-    if package_reference:
-        log.debug("Clearing search index for dataset %s..." %
-                  package_reference)
-        package_index.delete_package({'id': package_reference})
-    elif not SIMPLE_SEARCH:
-        log.debug("Clearing search index...")
-        package_index.clear()
+    log.debug("Clearing search index for dataset %s..." %
+              package_reference)
+    package_index.delete_package({'id': package_reference})
+
+
+def clear_all():
+    package_index = index_for(model.Package)
+    log.debug("Clearing search index...")
+    package_index.clear()
 
 
 def check_solr_schema_version(schema_file=None):
@@ -262,11 +267,6 @@ def check_solr_schema_version(schema_file=None):
         :schema_file: Absolute path to an alternative schema file. Should
                       be only used for testing purposes (Default is None)
     '''
-
-
-    if SIMPLE_SEARCH:
-        # Not using the SOLR search backend
-        return False
 
     if not is_available():
         # Something is wrong with the SOLR server

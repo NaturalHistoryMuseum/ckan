@@ -21,7 +21,7 @@ this.ckan.module('resource-view-reorder', function($) {
         '</div>'
       ].join('\n'),
       handle: [
-        '<a href="javascript:;" class="handle">',
+        '<a href="javascript:;" class="handle" aria-label="Move view">',
         '<i class="fa fa-arrows"></i>',
         '</a>'
       ].join('\n'),

@@ -24,7 +24,7 @@ this.ckan.module('table-selectable-rows', function($) {
 		initialize: function() {
 			$.proxyAll(this, /_on/);
 			this.total_checkboxes = $('input[type="checkbox"]', this.el).length;
-			this.select_all = $('<input type="checkbox">')
+			this.select_all = $('<input type="checkbox" aria-label="Select all">')
 				.data('select-all', true)
 				.appendTo($('thead th:first-child', this.el));
 			this.el.on('change', 'input[type="checkbox"]', this._onHandleCheckboxToggle);

@@ -58,7 +58,7 @@
                   {% set notes = h.markdown_extract(package.notes, extract_length=truncate) %}
                   <tr>
                     <td>
-                      <input type="checkbox" name="dataset_{{ package.id }}">
+                      <input type="checkbox" name="dataset_{{ package.id }}" aria-label="Select {{ title }}">
                     </td>
                     <td class="context">
                       <a href="{% url_for 'dataset.edit', id=package.name %}" class="edit pull-right">

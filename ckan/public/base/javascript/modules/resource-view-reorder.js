@@ -16,12 +16,12 @@ this.ckan.module('resource-view-reorder', function($) {
       ].join('\n'),
       form_actions: [
         '<div class="form-actions">',
-        '<a href="javascript:;" class="cancel btn btn-danger pull-left"></a>',
-        '<a href="javascript:;" class="save btn btn-primary"></a>',
+        '<a href="javascript:;" class="cancel btn btn-danger pull-left" aria-label="Cancel"></a>',
+        '<a href="javascript:;" class="save btn btn-primary" aria-label="Save changes"></a>',
         '</div>'
       ].join('\n'),
       handle: [
-        '<a href="javascript:;" class="handle">',
+        '<a href="javascript:;" class="handle" aria-label="Click and drag this to move the view up or down in the list">',
         '<i class="fa fa-arrows"></i>',
         '</a>'
       ].join('\n'),

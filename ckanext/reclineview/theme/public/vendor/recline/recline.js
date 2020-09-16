@@ -4316,9 +4316,9 @@ my.Pager = Backbone.View.extend({
   template: ' \
     <div class="pagination"> \
       <ul class="pagination"> \
-        <li class="prev action-pagination-update"><a href="" class="btn btn-default">&laquo;</a></li> \
-        <li class="page-range"><a><label for="from">From</label><input id="from" name="from" type="text" value="{{from}}" /> &ndash; <label for="to">To</label><input id="to" name="to" type="text" value="{{to}}" /> </a></li> \
-        <li class="next action-pagination-update"><a href="" class="btn btn-default">&raquo;</a></li> \
+        <li class="prev action-pagination-update"><a href="" class="btn btn-default" aria-label="Previous page">&laquo;</a></li> \
+        <li class="page-range"><a aria-label="from - to selection"><label for="from">From</label><input id="from" aria-label="from" name="from" type="text" value="{{from}}" /> &ndash; <label for="to">To</label><input id="to" aria-label="to" name="to" type="text" value="{{to}}" /> </a></li> \
+        <li class="next action-pagination-update"><a href="" class="btn btn-default" aria-label="Next page">&raquo;</a></li> \
       </ul> \
     </div> \
   ',

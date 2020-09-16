@@ -1351,7 +1351,7 @@ class Page(paginate.Page):
             format=u"<div class='pagination-wrapper'><ul class='pagination'>"
             "$link_previous ~2~ $link_next</ul></div>",
             symbol_previous=u'«', symbol_next=u'»',
-            curpage_attr={'class': 'active'}, link_attr={}
+            curpage_attr={'class': 'active'}, link_attr={u'aria-label': u'go to page'}
         )
         return super(Page, self).pager(*args, **kwargs)
 

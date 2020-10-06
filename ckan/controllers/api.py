@@ -3,13 +3,9 @@
 import os.path
 import logging
 import cgi
-import datetime
-import glob
-import urllib
 
-from webob.multidict import UnicodeMultiDict
-from paste.util.multidict import MultiDict
 from six import text_type
+from six.moves.urllib.parse import unquote_plus
 
 import ckan.model as model
 import ckan.logic as logic
@@ -23,6 +19,7 @@ import ckan.lib.munge as munge
 from ckan.views import identify_user
 
 from ckan.common import _, c, request, response
+from six.moves import map
 
 
 log = logging.getLogger(__name__)
@@ -278,7 +275,7 @@ class ApiController(base.BaseController):
         limit = request.params.get('limit', 20)
         try:
             limit = int(limit)
-        except:
+        except ValueError:
             limit = 20
         limit = min(50, limit)
 
@@ -291,7 +288,7 @@ class ApiController(base.BaseController):
             return out
 
         query = query.limit(limit)
-        out = map(convert_to_dict, query.all())
+        out = [convert_to_dict(q) for q in query.all()]
         return out
 
     @jsonp.jsonpify
@@ -387,7 +384,7 @@ class ApiController(base.BaseController):
                 if keys and request.POST[keys[0]] in [u'1', u'']:
                     request_data = keys[0]
                 else:
-                    request_data = urllib.unquote_plus(request.body)
+                    request_data = unquote_plus(request.body)
             except Exception as inst:
                 msg = "Could not find the POST data: %r : %s" % \
                       (request.POST, inst)

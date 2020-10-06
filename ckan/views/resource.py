@@ -6,6 +6,7 @@ import logging
 import flask
 from flask.views import MethodView
 
+import six
 import ckan.lib.base as base
 import ckan.lib.datapreview as lib_datapreview
 import ckan.lib.helpers as h
@@ -15,7 +16,7 @@ import ckan.logic as logic
 import ckan.model as model
 import ckan.plugins as plugins
 from ckan.common import _, g, request
-from ckan.controllers.home import CACHE_PARAMETERS
+from ckan.views.home import CACHE_PARAMETERS
 from ckan.views.dataset import (
     _get_pkg_template, _get_package_type, _setup_template_variables
 )
@@ -34,6 +35,12 @@ flatten_to_string_key = logic.flatten_to_string_key
 log = logging.getLogger(__name__)
 
 resource = Blueprint(
+    u'dataset_resource',
+    __name__,
+    url_prefix=u'/dataset/<id>/resource',
+    url_defaults={u'package_type': u'dataset'}
+)
+prefixed_resource = Blueprint(
     u'resource',
     __name__,
     url_prefix=u'/dataset/<id>/resource',
@@ -54,6 +61,31 @@ def read(package_type, id, resource_id):
         package = get_action(u'package_show')(context, {u'id': id})
     except (NotFound, NotAuthorized):
         return base.abort(404, _(u'Dataset not found'))
+    activity_id = request.params.get(u'activity_id')
+    if activity_id:
+        # view an 'old' version of the package, as recorded in the
+        # activity stream
+        current_pkg = package
+        try:
+            package = context['session'].query(model.Activity).get(
+                activity_id
+            ).data['package']
+        except AttributeError:
+            base.abort(404, _(u'Dataset not found'))
+
+        if package['id'] != current_pkg['id']:
+            log.info(u'Mismatch between pkg id in activity and URL {} {}'
+                     .format(package['id'], current_pkg['id']))
+            # the activity is not for the package in the URL - don't allow
+            # misleading URLs as could be malicious
+            base.abort(404, _(u'Activity not found'))
+        # The name is used lots in the template for links, so fix it to be
+        # the current one. It's not displayed to the user anyway.
+        package['name'] = current_pkg['name']
+
+        # Don't crash on old (unmigrated) activity records, which do not
+        # include resources or extras.
+        package.setdefault(u'resources', [])
 
     resource = None
     for res in package.get(u'resources', []):
@@ -109,7 +141,10 @@ def read(package_type, id, resource_id):
         u'pkg_dict': package,
         u'package': package,
         u'resource': resource,
-        u'pkg': pkg
+        u'pkg': pkg,  # NB it is the current version of the dataset, so ignores
+                      # activity_id. Still used though in resource views for
+                      # backward compatibility
+        u'is_activity_archive': bool(activity_id),
     }
 
     template = _get_pkg_template(u'resource_template', dataset_type)
@@ -166,7 +201,7 @@ class CreateView(MethodView):
 
         # see if we have any data that we are trying to save
         data_provided = False
-        for key, value in data.iteritems():
+        for key, value in six.iteritems(data):
             if (
                     (value or isinstance(value, cgi.FieldStorage))
                     and key != u'resource_type'):
@@ -176,7 +211,7 @@ class CreateView(MethodView):
         if not data_provided and save_action != u"go-dataset-complete":
             if save_action == u'go-dataset':
                 # go to final stage of adddataset
-                return h.redirect_to(u'dataset.edit', id=id)
+                return h.redirect_to(u'{}.edit'.format(package_type), id=id)
             # see if we have added any resources
             try:
                 data_dict = get_action(u'package_show')(context, {u'id': id})
@@ -202,7 +237,7 @@ class CreateView(MethodView):
                 dict(context, allow_state_change=True),
                 dict(data_dict, state=u'active')
             )
-            return h.redirect_to(u'dataset.read', id=id)
+            return h.redirect_to(u'{}.read'.format(package_type), id=id)
 
         data[u'package_id'] = id
         try:
@@ -214,6 +249,10 @@ class CreateView(MethodView):
         except ValidationError as e:
             errors = e.error_dict
             error_summary = e.error_summary
+            if data.get(u'url_type') == u'upload' and data.get(u'url'):
+                data[u'url'] = u''
+                data[u'url_type'] = u''
+                data[u'previous_upload'] = True
             return self.get(package_type, id, data, errors, error_summary)
         except NotAuthorized:
             return base.abort(403, _(u'Unauthorized to create a resource'))
@@ -228,16 +267,19 @@ class CreateView(MethodView):
                 dict(context, allow_state_change=True),
                 dict(data_dict, state=u'active')
             )
-            return h.redirect_to(u'dataset.read', id=id)
+            return h.redirect_to(u'{}.read'.format(package_type), id=id)
         elif save_action == u'go-dataset':
             # go to first stage of add dataset
-            return h.redirect_to(u'dataset.edit', id=id)
+            return h.redirect_to(u'{}.edit'.format(package_type), id=id)
         elif save_action == u'go-dataset-complete':
 
-            return h.redirect_to(u'dataset.read', id=id)
+            return h.redirect_to(u'{}.read'.format(package_type), id=id)
         else:
             # add more resources
-            return h.redirect_to(u'resource.new', id=id)
+            return h.redirect_to(
+                u'{}_resource.new'.format(package_type),
+                id=id
+            )
 
     def get(
         self, package_type, id, data=None, errors=None, error_summary=None
@@ -333,7 +375,10 @@ class EditView(MethodView):
             )
         except NotAuthorized:
             return base.abort(403, _(u'Unauthorized to edit this resource'))
-        return h.redirect_to(u'resource.read', id=id, resource_id=resource_id)
+        return h.redirect_to(
+            u'{}_resource.read'.format(package_type),
+            id=id, resource_id=resource_id
+        )
 
     def get(
         self,
@@ -363,7 +408,8 @@ class EditView(MethodView):
         resource = resource_dict
         # set the form action
         form_action = h.url_for(
-            u'resource.edit', resource_id=resource_id, id=id
+            u'{}_resource.edit'.format(package_type),
+            resource_id=resource_id, id=id
         )
         if not data:
             data = resource_dict
@@ -408,7 +454,8 @@ class DeleteView(MethodView):
     def post(self, package_type, id, resource_id):
         if u'cancel' in request.form:
             return h.redirect_to(
-                u'resource.edit', resource_id=resource_id, id=id
+                u'{}_resource.edit'.format(package_type),
+                resource_id=resource_id, id=id
             )
         context = self._prepare(id)
 
@@ -417,9 +464,12 @@ class DeleteView(MethodView):
             h.flash_notice(_(u'Resource has been deleted.'))
             pkg_dict = get_action(u'package_show')(None, {u'id': id})
             if pkg_dict[u'state'].startswith(u'draft'):
-                return h.redirect_to(u'resource.new', id=id)
+                return h.redirect_to(
+                    u'{}_resource.new'.format(package_type),
+                    id=id
+                )
             else:
-                return h.redirect_to(u'dataset.read', id=id)
+                return h.redirect_to(u'{}.read'.format(package_type), id=id)
         except NotAuthorized:
             return base.abort(
                 403,
@@ -648,7 +698,8 @@ class EditResourceViewView(MethodView):
         else:
             if not to_preview:
                 return h.redirect_to(
-                    u'resource.views', id=id, resource_id=resource_id
+                    u'{}_resource.views'.format(package_type),
+                    id=id, resource_id=resource_id
                 )
         extra_vars[u'data'] = data
         extra_vars[u'to_preview'] = to_preview
@@ -663,26 +714,33 @@ class EditResourceViewView(MethodView):
             extra_vars.update(post_extra)
 
         package_type = _get_package_type(id)
-        data = extra_vars[u'data']
-        view_type = None
+        data = extra_vars[u'data'] if u'data' in extra_vars else None
+        if data and u'view_type' in data:
+            view_type = data.get(u'view_type')
+        else:
+            view_type = request.args.get(u'view_type')
+
         # view_id exists only when updating
         if view_id:
-            if not data:
+            if not data or not view_type:
                 try:
-                    data = get_action(u'resource_view_show')(
+                    view_data = get_action(u'resource_view_show')(
                         context, {
                             u'id': view_id
                         }
                     )
+                    view_type = view_data[u'view_type']
+                    if data:
+                        data.update(view_data)
+                    else:
+                        data = view_data
                 except (NotFound, NotAuthorized):
                     return base.abort(404, _(u'View not found'))
 
-            view_type = data.get(u'view_type')
             # might as well preview when loading good existing view
             if not extra_vars[u'errors']:
                 to_preview = True
 
-        view_type = view_type or request.args.get(u'view_type')
         data[u'view_type'] = view_type
         view_plugin = lib_datapreview.get_view_plugin(view_type)
         if not view_plugin:
@@ -909,3 +967,4 @@ def register_dataset_plugin_rules(blueprint):
 
 
 register_dataset_plugin_rules(resource)
+register_dataset_plugin_rules(prefixed_resource)

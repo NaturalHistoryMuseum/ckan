@@ -7,17 +7,17 @@ import sqlalchemy
 import os
 import pprint
 import sqlalchemy.engine.url as sa_url
-import urllib
-import urllib2
-import urlparse
 import datetime
 import hashlib
 import json
-from cStringIO import StringIO
+from collections import OrderedDict
 
-from six import string_types, text_type
+import six
+from six.moves.urllib.parse import (
+    urlencode, unquote, urlunparse, parse_qsl, urlparse
+)
+from six import string_types, text_type, StringIO
 
-import ckan.lib.cli as cli
 import ckan.plugins as p
 import ckan.plugins.toolkit as toolkit
 from ckan.lib.lazyjson import LazyJSONObject
@@ -32,7 +32,7 @@ from sqlalchemy.exc import (ProgrammingError, IntegrityError,
 
 import ckan.model as model
 import ckan.plugins as plugins
-from ckan.common import config, OrderedDict
+from ckan.common import config
 
 from ckanext.datastore.backend import (
     DatastoreBackend,
@@ -115,6 +115,7 @@ def _get_engine_from_url(connection_url):
     engine = _engines.get(connection_url)
     if not engine:
         extras = {'url': connection_url}
+        config.setdefault('pool_pre_ping', True)
         engine = sqlalchemy.engine_from_config(config,
                                                'ckan.datastore.sqlalchemy.',
                                                **extras)
@@ -284,7 +285,7 @@ def _get_fields(connection, resource_id):
     for field in all_fields.cursor.description:
         if not field[0].startswith('_'):
             fields.append({
-                'id': field[0].decode('utf-8'),
+                'id': six.ensure_text(field[0]),
                 'type': _get_type(connection, field[1])
             })
     return fields
@@ -315,7 +316,7 @@ def _cache_types(connection):
             # redo cache types with json now available.
             return _cache_types(connection)
 
-        register_composite('nested', connection.connection, True)
+        register_composite('nested', connection.connection.connection, True)
 
 
 def _pg_version_is_at_least(connection, version):
@@ -330,7 +331,7 @@ def _pg_version_is_at_least(connection, version):
 
 
 def _get_read_only_user(data_dict):
-    parsed = cli.parse_db_config('ckan.datastore.read_url')
+    parsed = model.parse_db_config('ckan.datastore.read_url')
     return parsed['db_user']
 
 
@@ -360,10 +361,14 @@ def _where_clauses(data_dict, fields_types):
     filters = data_dict.get('filters', {})
     clauses = []
 
-    for field, value in filters.iteritems():
+    for field, value in six.iteritems(filters):
         if field not in fields_types:
             continue
         field_array_type = _is_array_type(fields_types[field])
+        # "%" needs to be escaped as "%%" in any query going to
+        # connection.execute, otherwise it will think the "%" is for
+        # substituting a bind parameter
+        field = field.replace('%', '%%')
         if isinstance(value, list) and not field_array_type:
             clause_str = (u'"{0}" in ({1})'.format(field,
                           ','.join(['%s'] * len(value))))
@@ -381,7 +386,7 @@ def _where_clauses(data_dict, fields_types):
             clauses.append((clause_str,))
         elif isinstance(q, dict):
             lang = _fts_lang(data_dict.get('lang'))
-            for field, value in q.iteritems():
+            for field, value in six.iteritems(q):
                 if field not in fields_types:
                     continue
                 query_field = _ts_query_alias(field)
@@ -422,7 +427,7 @@ def _textsearch_query(lang, q, plain):
         statements.append(query)
         rank_columns[u'rank'] = rank
     elif isinstance(q, dict):
-        for field, value in q.iteritems():
+        for field, value in six.iteritems(q):
             query, rank = _build_query_and_rank_statements(
                 lang, value, plain, field)
             statements.append(query)
@@ -471,7 +476,10 @@ def _sort(sort, fields_types, rank_columns):
     to order by best text search match
     '''
     if not sort:
-        return rank_columns.values()
+        rank_sorting = []
+        for column in rank_columns.values():
+            rank_sorting.append(u'{0} DESC'.format(column))
+        return rank_sorting
 
     clauses = datastore_helpers.get_list(sort, False)
 
@@ -668,14 +676,14 @@ def _insert_links(data_dict, limit, offset):
     # get the url from the request
     try:
         urlstring = toolkit.request.environ['CKAN_CURRENT_URL']
-    except (KeyError, TypeError):
+    except (KeyError, TypeError, RuntimeError):
         return  # no links required for local actions
 
     # change the offset in the url
-    parsed = list(urlparse.urlparse(urlstring))
-    query = urllib2.unquote(parsed[4])
+    parsed = list(urlparse(urlstring))
+    query = unquote(parsed[4])
 
-    arguments = dict(urlparse.parse_qsl(query))
+    arguments = dict(parse_qsl(query))
     arguments_start = dict(arguments)
     arguments_prev = dict(arguments)
     arguments_next = dict(arguments)
@@ -687,15 +695,15 @@ def _insert_links(data_dict, limit, offset):
     parsed_start = parsed[:]
     parsed_prev = parsed[:]
     parsed_next = parsed[:]
-    parsed_start[4] = urllib.urlencode(arguments_start)
-    parsed_next[4] = urllib.urlencode(arguments_next)
-    parsed_prev[4] = urllib.urlencode(arguments_prev)
+    parsed_start[4] = urlencode(arguments_start)
+    parsed_next[4] = urlencode(arguments_next)
+    parsed_prev[4] = urlencode(arguments_prev)
 
     # add the links to the data dict
-    data_dict['_links']['start'] = urlparse.urlunparse(parsed_start)
-    data_dict['_links']['next'] = urlparse.urlunparse(parsed_next)
+    data_dict['_links']['start'] = urlunparse(parsed_start)
+    data_dict['_links']['next'] = urlunparse(parsed_next)
     if int(offset) - int(limit) > 0:
-        data_dict['_links']['prev'] = urlparse.urlunparse(parsed_prev)
+        data_dict['_links']['prev'] = urlunparse(parsed_prev)
 
 
 def _where(where_clauses_and_values):
@@ -733,7 +741,7 @@ def convert(data, type_name):
         sub_type = type_name[1:]
         return [convert(item, sub_type) for item in data]
     if type_name == 'tsvector':
-        return text_type(data, 'utf-8')
+        return six.ensure_text(data)
     if isinstance(data, datetime.datetime):
         return data.isoformat()
     if isinstance(data, (int, float)):
@@ -812,7 +820,7 @@ def create_indexes(context, data_dict):
             name=_generate_index_name(data_dict['resource_id'], fields_string),
             fields=fields_string))
 
-    sql_index_strings = map(lambda x: x.replace('%', '%%'), sql_index_strings)
+    sql_index_strings = [x.replace('%', '%%') for x in sql_index_strings]
     current_indexes = _get_index_names(context['connection'],
                                        data_dict['resource_id'])
     for sql_index_string in sql_index_strings:
@@ -874,7 +882,7 @@ def create_table(context, data_dict):
             field['type'] = _guess_type(records[0][field['id']])
 
     # Check for duplicate fields
-    unique_fields = set([f['id'] for f in supplied_fields])
+    unique_fields = {f['id'] for f in supplied_fields}
     if not len(unique_fields) == len(supplied_fields):
         raise ValidationError({
             'field': ['Duplicate column names are not supported']
@@ -1039,7 +1047,7 @@ def upsert_data(context, data_dict):
             row = []
             for field in fields:
                 value = record.get(field['id'])
-                if value and field['type'].lower() == 'nested':
+                if value is not None and field['type'].lower() == 'nested':
                     # a tuple with an empty second value
                     value = (json.dumps(value), '')
                 row.append(value)
@@ -1054,11 +1062,10 @@ def upsert_data(context, data_dict):
 
         try:
             context['connection'].execute(sql_string, rows)
-        except sqlalchemy.exc.DataError:
+        except sqlalchemy.exc.DataError as err:
             raise InvalidDataError(
-                toolkit._("The data was invalid (for example: a numeric value "
-                          "is out of range or was inserted into a text field)."
-                          ))
+                toolkit._("The data was invalid: {}"
+                          ).format(_programming_error_summary(err)))
         except sqlalchemy.exc.DatabaseError as err:
             raise ValidationError(
                 {u'records': [_programming_error_summary(err)]})
@@ -1145,8 +1152,9 @@ def upsert_data(context, data_dict):
                                     WHERE ({primary_key}) = ({primary_value}));
                 '''.format(
                     res_id=data_dict['resource_id'],
-                    columns=u', '.join([u'"{0}"'.format(field)
-                                        for field in used_field_names]),
+                    columns=u', '.join([
+                        u'"{0}"'.format(field.replace('%', '%%'))
+                        for field in used_field_names]),
                     values=u', '.join(['%s::nested'
                                        if field['type'] == 'nested' else '%s'
                                        for field in used_fields]),
@@ -1189,9 +1197,11 @@ def validate(context, data_dict):
 
     data_dict_copy.pop('id', None)
     data_dict_copy.pop('include_total', None)
+    data_dict_copy.pop('total_estimation_threshold', None)
     data_dict_copy.pop('records_format', None)
+    data_dict_copy.pop('calculate_record_count', None)
 
-    for key, values in data_dict_copy.iteritems():
+    for key, values in six.iteritems(data_dict_copy):
         if not values:
             continue
         if isinstance(values, string_types):
@@ -1199,7 +1209,7 @@ def validate(context, data_dict):
         elif isinstance(values, (list, tuple)):
             value = values[0]
         elif isinstance(values, dict):
-            value = values.keys()[0]
+            value = list(values.keys())[0]
         else:
             value = values
 
@@ -1312,17 +1322,53 @@ def search_data(context, data_dict):
     _insert_links(data_dict, limit, offset)
 
     if data_dict.get('include_total', True):
-        count_sql_string = u'''SELECT count(*) FROM (
-            SELECT {distinct} {select}
-            FROM "{resource}" {ts_query} {where}) as t;'''.format(
-            distinct=distinct,
-            select=select_columns,
-            resource=resource_id,
-            ts_query=ts_query,
-            where=where_clause)
-        count_result = _execute_single_statement(
-            context, count_sql_string, where_values)
-        data_dict['total'] = count_result.fetchall()[0][0]
+        total_estimation_threshold = \
+            data_dict.get('total_estimation_threshold')
+        estimated_total = None
+        if total_estimation_threshold is not None and \
+                not (where_clause or distinct):
+            # there are no filters, so we can try to use the estimated table
+            # row count from pg stats
+            # See: https://wiki.postgresql.org/wiki/Count_estimate
+            # (We also tried using the EXPLAIN to estimate filtered queries but
+            #  it didn't estimate well in tests)
+            analyze_count_sql = sqlalchemy.text('''
+            SELECT reltuples::BIGINT AS approximate_row_count
+            FROM pg_class
+            WHERE relname=:resource;
+            ''')
+            count_result = context['connection'].execute(analyze_count_sql,
+                                                         resource=resource_id)
+            try:
+                estimated_total = count_result.fetchall()[0][0]
+            except ValueError:
+                # the table doesn't have the stats calculated yet. (This should
+                # be done by xloader/datapusher at the end of loading.)
+                # We could provoke their creation with an ANALYZE, but that
+                # takes 10x the time to run, compared to SELECT COUNT(*) so
+                # we'll just revert to the latter. At some point the autovacuum
+                # will run and create the stats so we can use an estimate in
+                # future.
+                pass
+
+        if estimated_total is not None \
+                and estimated_total >= total_estimation_threshold:
+            data_dict['total'] = estimated_total
+            data_dict['total_was_estimated'] = True
+        else:
+            # this is slow for large results
+            count_sql_string = u'''SELECT count(*) FROM (
+                SELECT {distinct} {select}
+                FROM "{resource}" {ts_query} {where}) as t;'''.format(
+                distinct=distinct,
+                select=select_columns,
+                resource=resource_id,
+                ts_query=ts_query,
+                where=where_clause)
+            count_result = _execute_single_statement(
+                context, count_sql_string, where_values)
+            data_dict['total'] = count_result.fetchall()[0][0]
+            data_dict['total_was_estimated'] = False
 
     return data_dict
 
@@ -1338,11 +1384,11 @@ def _execute_single_statement_copy_to(context, sql_string, where_values, buf):
     cursor.close()
 
 
-def format_results(context, results, data_dict):
+def format_results(context, results, data_dict, rows_max):
     result_fields = []
     for field in results.cursor.description:
         result_fields.append({
-            'id': field[0].decode('utf-8'),
+            'id': six.ensure_text(field[0]),
             'type': _get_type(context['connection'], field[1])
         })
 
@@ -1354,6 +1400,8 @@ def format_results(context, results, data_dict):
                                                  field['type'])
         records.append(converted_row)
     data_dict['records'] = records
+    if data_dict.get('records_truncated', False):
+        data_dict['records'].pop()
     data_dict['fields'] = result_fields
 
     return _unrename_json_field(data_dict)
@@ -1513,6 +1561,11 @@ def search_sql(context, data_dict):
 
     sql = data_dict['sql'].replace('%', '%%')
 
+    # limit the number of results to ckan.datastore.search.rows_max + 1
+    # (the +1 is so that we know if the results went over the limit or not)
+    rows_max = int(config.get('ckan.datastore.search.rows_max', 32000))
+    sql = 'SELECT * FROM ({0}) AS blah LIMIT {1} ;'.format(sql, rows_max + 1)
+
     try:
 
         context['connection'].execute(
@@ -1529,7 +1582,10 @@ def search_sql(context, data_dict):
 
         results = context['connection'].execute(sql)
 
-        return format_results(context, results, data_dict)
+        if results.rowcount == rows_max + 1:
+            data_dict['records_truncated'] = True
+
+        return format_results(context, results, data_dict, rows_max)
 
     except ProgrammingError as e:
         if e.orig.pgcode == _PG_ERR_CODE['permission_denied']:
@@ -1681,6 +1737,11 @@ class DatastorePostgresqlBackend(DatastoreBackend):
         else:
             self._check_urls_and_permissions()
 
+        # check rows_max is valid on CKAN start-up
+        rows_max = config.get('ckan.datastore.search.rows_max')
+        if rows_max is not None:
+            int(rows_max)
+
     def datastore_delete(self, context, data_dict, fields_types, query_dict):
         query_dict['where'] += _where_clauses(data_dict, fields_types)
         return query_dict
@@ -1702,6 +1763,7 @@ class DatastorePostgresqlBackend(DatastoreBackend):
         else:
             field_ids = fields_types.keys()
 
+        # add default limit here just in case - already defaulted in the schema
         limit = data_dict.get('limit', 100)
         offset = data_dict.get('offset', 0)
 
@@ -1876,8 +1938,8 @@ class DatastorePostgresqlBackend(DatastoreBackend):
 
     def resource_id_from_alias(self, alias):
         real_id = None
-        resources_sql = sqlalchemy.text(u'''SELECT alias_of FROM "_table_metadata"
-                                        WHERE name = :id''')
+        resources_sql = sqlalchemy.text(
+            u'''SELECT alias_of FROM "_table_metadata" WHERE name = :id''')
         results = self._get_read_engine().execute(resources_sql, id=alias)
 
         res_exists = results.rowcount > 0
@@ -1948,6 +2010,19 @@ class DatastorePostgresqlBackend(DatastoreBackend):
         # to avoid sharing them between parent and child processes.
         _dispose_engines()
 
+    def calculate_record_count(self, resource_id):
+        '''
+        Calculate an estimate of the record/row count and store it in
+        Postgresql's pg_stat_user_tables. This number will be used when
+        specifying `total_estimation_threshold`
+        '''
+        connection = get_write_engine().connect()
+        sql = 'ANALYZE "{}"'.format(resource_id)
+        try:
+            connection.execute(sql)
+        except sqlalchemy.exc.DatabaseError as err:
+            raise DatastoreException(err)
+
 
 def create_function(name, arguments, rettype, definition, or_replace):
     sql = u'''
@@ -1968,8 +2043,9 @@ def create_function(name, arguments, rettype, definition, or_replace):
         _write_engine_execute(sql)
     except ProgrammingError as pe:
         already_exists = (
-          u'function "{}" already exists with same argument types'.format(name)
-          in pe.args[0])
+            u'function "{}" already exists with same argument types'
+            .format(name)
+            in pe.args[0])
         key = u'name' if already_exists else u'definition'
         raise ValidationError({key: [_programming_error_summary(pe)]})
 
@@ -2009,5 +2085,5 @@ def _programming_error_summary(pe):
     ValidationError to send back to API users
     '''
     # first line only, after the '(ProgrammingError)' text
-    message = pe.args[0].split('\n')[0].decode('utf8')
+    message = six.ensure_text(pe.args[0].split('\n')[0])
     return message.split(u') ', 1)[-1]

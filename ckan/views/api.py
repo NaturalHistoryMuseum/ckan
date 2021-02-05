@@ -269,8 +269,9 @@ def action(logic_function, ver=API_DEFAULT_VERSION):
 
     # Get the request data
     try:
-        if function.func_name == u'wrapped':
-            f = function.func_closure[0].cell_contents
+        # TODO: check if this alteration is necessary (not sure what has been merged upstream)
+        if function.__name__ == u'wrapped':
+            f = function.__closure__[0].cell_contents
             if hasattr(f, u'args'):
                 f = f.args[0]
         else:

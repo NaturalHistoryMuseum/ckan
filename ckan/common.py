@@ -187,7 +187,7 @@ def _get_c():
     if is_flask_request():
         return flask.g
     else:
-        return pylons.tmpl_context
+        return pylons.c
 
 
 def _get_session():

@@ -147,12 +147,12 @@ def load_config(config, load_site_user=True):
         # auth works as in a normal web request
         c = pylons.util.AttribSafeContextObj()
 
-        registry.register(pylons.tmpl_context, c)
+        registry.register(pylons.c, c)
 
         site_user = logic.get_action('get_site_user')({'ignore_auth': True}, {})
 
-        pylons.tmpl_context.user = site_user['name']
-        pylons.tmpl_context.userobj = model.User.get(site_user['name'])
+        pylons.c.user = site_user['name']
+        pylons.c.userobj = model.User.get(site_user['name'])
 
     ## give routes enough information to run url_for
     parsed = urlparse(conf.get('ckan.site_url', 'http://0.0.0.0'))

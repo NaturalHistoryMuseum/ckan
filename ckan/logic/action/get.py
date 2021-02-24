@@ -1289,7 +1289,6 @@ def organization_show(context, data_dict):
     :type include_followers: bool
 
 
-
     :rtype: dictionary
 
     .. note:: Only its first 1000 datasets are returned

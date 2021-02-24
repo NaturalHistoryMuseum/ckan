@@ -1,7 +1,6 @@
 # encoding: utf-8
 
 '''CKAN environment configuration'''
-import json
 import os
 import logging
 import warnings

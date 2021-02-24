@@ -146,15 +146,6 @@ c. Install the CKAN source code into your virtualenv.
 
        pip install -e 'git+\ |git_url|\#egg=ckan[requirements,dev]'
 
-   .. tip::
-      
-      If you would like to work submit a pull request with your changes, be sure you are working from a cloned repository.
-      Use your personal repository URL instead of the CKAN repository. E.g.
-      
-      .. parsed-literal::
-         
-         pip install -e 'git=https://github.com/{your-username}/ckan.git#egg=ckan'
-   
    .. warning::
 
       The development version may contain bugs and should not be used for

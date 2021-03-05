@@ -1,10 +1,8 @@
 this.ckan.module('recline_view', function (jQuery) {
   var NoRecordsView = Backbone.View.extend({
-    template: '<div class="recline-norecords">{{text}}</div>',
     render: function(){
-      var self = this;
-      var htmls = Mustache.render(self.template, {text: self.options.i18n.noRecords});
-      self.$el.html(htmls);
+      // TODO: i18n
+      this.$el.html('<div class="recline-norecords">No matching records</div>');
     }
   });
   return {
@@ -136,8 +134,7 @@ this.ckan.module('recline_view', function (jQuery) {
 
       if(typeof(dataset.recordCount) == 'undefined' || dataset.recordCount == 0){
         view = new NoRecordsView({
-          'model': dataset,
-          i18n: {noRecords:this.options.i18n.noRecords}
+          'model': dataset
         });
       } else if(reclineView.view_type === "recline_graph_view") {
         state = {

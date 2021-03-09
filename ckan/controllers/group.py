@@ -2,8 +2,9 @@
 
 import logging
 import datetime
-from urllib import urlencode
+from six.moves.urllib.parse import urlencode
 
+from collections import OrderedDict
 from pylons.i18n import get_lang
 from six import string_types, text_type
 
@@ -16,7 +17,7 @@ import ckan.model as model
 import ckan.authz as authz
 import ckan.lib.plugins
 import ckan.plugins as plugins
-from ckan.common import OrderedDict, c, config, request, _
+from ckan.common import c, config, request, _
 
 log = logging.getLogger(__name__)
 
@@ -220,6 +221,10 @@ class GroupController(base.BaseController):
             # Do not query for the group datasets when dictizing, as they will
             # be ignored and get requested on the controller anyway
             data_dict['include_datasets'] = False
+
+            # Do not query group members as they aren't used in the view
+            data_dict['include_users'] = False
+
             c.group_dict = self._action('group_show')(context, data_dict)
             c.group = context['group']
         except (NotFound, NotAuthorized):
@@ -322,7 +327,7 @@ class GroupController(base.BaseController):
                     facets[facet] = facet
 
             # Facet titles
-            self._update_facet_titles(facets, group_type)
+            facets = self._update_facet_titles(facets, group_type)
 
             c.facet_titles = facets
 
@@ -373,6 +378,7 @@ class GroupController(base.BaseController):
         for plugin in plugins.PluginImplementations(plugins.IFacets):
             facets = plugin.group_facets(
                 facets, group_type, None)
+        return facets
 
     def bulk_process(self, id):
         ''' Allow bulk processing of datasets for an organization.  Make
@@ -802,7 +808,7 @@ class GroupController(base.BaseController):
                     revision_dict['timestamp'])
                 try:
                     dayHorizon = int(request.params.get('days'))
-                except:
+                except ValueError:
                     dayHorizon = 30
                 dayAge = (datetime.datetime.now() - revision_date).days
                 if dayAge >= dayHorizon:

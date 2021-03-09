@@ -3,7 +3,7 @@
 
 The more specific and detailed routes should be defined first so they
 may take precedent over the more generic routes. For more information
-refer to the routes manual at http://routes.groovie.org/docs/
+refer to the routes manual at https://routes.readthedocs.io/en/latest/
 
 """
 import re
@@ -134,21 +134,6 @@ def make_map():
     # users
     map.redirect('/users/{url:.*}', '/user/{url}')
 
-    with SubMapper(map, controller='revision') as m:
-        m.connect('/revision', action='index')
-        m.connect('/revision/edit/{id}', action='edit')
-        m.connect('/revision/diff/{id}', action='diff')
-        m.connect('/revision/list', action='list')
-        m.connect('/revision/{id}', action='read')
-
-    with SubMapper(map, controller='util') as m:
-        m.connect('/i18n/strings_{lang}.js', action='i18n_js_strings')
-        m.connect('/util/redirect', action='redirect')
-        m.connect('/testing/primer', action='primer')
-
-    # robots.txt
-    map.connect('/(robots.txt)', controller='template', action='view')
-
     # Mark all unmarked routes added up until now as core routes
     for route in map.matchlist:
         if not hasattr(route, '_ckan_core'):
@@ -168,6 +153,5 @@ def make_map():
     map.redirect('/favicon.ico', config.get('ckan.favicon'))
 
     map.redirect('/*(url)/', '/{url}', _redirect_code='301 Moved Permanently')
-    map.connect('/*url', controller='template', action='view', ckan_core=True)
 
     return map

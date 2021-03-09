@@ -13,8 +13,8 @@ Find out the |postgres| connection settings, as used by CKAN and Datastore:
 
 .. parsed-literal::
 
-   grep sqlalchemy.url |production.ini|
-   grep ckan.datastore.write_url |production.ini|
+   grep sqlalchemy.url |ckan.ini|
+   grep ckan.datastore.write_url |ckan.ini|
 
 where the format of the connection strings is one of these::
 
@@ -48,7 +48,7 @@ The version will look like this::
 
     server_version
     ----------------
-    9.1.9 
+    9.1.9
     (1 row)
 
 Ignoring the last number of the three, if your |postgres| version number is
@@ -124,10 +124,8 @@ Upgrading
     |activate|
     cd |virtualenv|/src/ckan
 
-#. Stop your server to prevent further writes to the database (because those
-   changes would be lost)::
-
-     sudo service apache2 stop
+#. Stop your web server to prevent further writes to the database (because those
+   changes would be lost).
 
 #. Create a back-up of the database roles::
 
@@ -144,7 +142,7 @@ Upgrading
 
    or remotely::
 
-     psql --host=HOSTNAME --username=USERNAME -W -l 
+     psql --host=HOSTNAME --username=USERNAME -W -l
 
    The databases listed should comprise:
 
@@ -244,7 +242,7 @@ Upgrading
 
    It is likely that the old |postgres| is port 5432 and the new one is on 5433.
 
-   Now edit the |production.ini| to insert the port number into the `sqlalchemy.url`. e.g.:
+   Now edit the |ckan.ini| to insert the port number into the `sqlalchemy.url`. e.g.:
 
    .. parsed-literal::
 

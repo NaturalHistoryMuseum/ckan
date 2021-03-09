@@ -1,16 +1,15 @@
 this.ckan.module('recline_view', function (jQuery) {
   var NoRecordsView = Backbone.View.extend({
-    template: '<div class="recline-norecords">{{text}}</div>',
     render: function(){
-      var self = this;
-      var htmls = Mustache.render(self.template, {text: self.options.i18n.noRecords});
-      self.$el.html(htmls);
+      // TODO: i18n
+      this.$el.html('<div class="recline-norecords">No matching records</div>');
     }
   });
   return {
     options: {
       site_url: "",
-      controlsClassName: "controls"
+      controlsClassName: "controls",
+      dataproxyUrl: "//jsonpdataproxy.appspot.com"
     },
 
     initialize: function () {
@@ -26,7 +25,33 @@ this.ckan.module('recline_view', function (jQuery) {
       var resourceData = this.options.resource,
           resourceView = this.options.resourceView;
 
-      this.loadView(resourceData, resourceView);
+      setTimeout(this.waitForViews.bind(this, 0, resourceData, resourceView), 0);
+    },
+
+    /**
+     * This module relies on the existence of window.parent.ckan.views and
+     * window.parent.ckan.views.filters to operate properly and therefore we need to wait for those
+     * properties to become available. This function does just that, checking on a timeout loop
+     * every 50ms to see if the properties exist before calling the loadView function. If we attempt
+     * this check 100 or more times (more than 5 seconds) we give up and let the view load anyway.
+     *
+     * Sometimes this module loads before those properties are defined and therefore this module
+     * fails due to the race condition. This only happens/is far more likely to happen when used in
+     * an iframe where window.parent actually points to the parent rather than window.
+     *
+     * @param attempts the number of attempts at checking for the properties that we've done
+     * @param resourceData the resource data object as required by loadView
+     * @param resourceView the resource view object as required by loadView
+     */
+    waitForViews: function(attempts, resourceData, resourceView) {
+      if ((window.parent.ckan && window.parent.ckan.views && window.parent.ckan.views.filters) ||
+            attempts >= 100) {
+        // the properties exist or we've waited for 2 seconds, let's go!
+        this.loadView(resourceData, resourceView);
+      } else {
+        // the properties aren't there yet, wait 50ms and try again
+        setTimeout(this.waitForViews.bind(this, attempts + 1, resourceData, resourceView), 50);
+      }
     },
 
     loadView: function (resourceData, reclineView) {
@@ -52,6 +77,9 @@ this.ckan.module('recline_view', function (jQuery) {
 
       if (!resourceData.datastore_active) {
           recline.Backend.DataProxy.timeout = 10000;
+
+          recline.Backend.DataProxy.dataproxy_url = this.options.dataproxyUrl;
+
           resourceData.backend =  'dataproxy';
       } else {
           resourceData.backend =  'ckan';
@@ -106,8 +134,7 @@ this.ckan.module('recline_view', function (jQuery) {
 
       if(typeof(dataset.recordCount) == 'undefined' || dataset.recordCount == 0){
         view = new NoRecordsView({
-          'model': dataset,
-          i18n: {noRecords:this.options.i18n.noRecords}
+          'model': dataset
         });
       } else if(reclineView.view_type === "recline_graph_view") {
         state = {

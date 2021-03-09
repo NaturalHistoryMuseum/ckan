@@ -2,28 +2,31 @@
 import logging
 from collections import OrderedDict
 from functools import partial
-from urllib import urlencode
-import datetime
+from six.moves.urllib.parse import urlencode
+from datetime import datetime
 
-from flask import Blueprint, make_response
+from flask import Blueprint
 from flask.views import MethodView
-from paste.deploy.converters import asbool
+from werkzeug.datastructures import MultiDict
+from ckan.common import asbool
+
+import six
 from six import string_types, text_type
 
-import ckan.lib.i18n as i18n
 import ckan.lib.base as base
 import ckan.lib.helpers as h
 import ckan.lib.navl.dictization_functions as dict_fns
 import ckan.logic as logic
 import ckan.model as model
 import ckan.plugins as plugins
+import ckan.authz as authz
 from ckan.common import _, config, g, request
-from ckan.controllers.home import CACHE_PARAMETERS
+from ckan.views.home import CACHE_PARAMETERS
 from ckan.lib.plugins import lookup_package_plugin
 from ckan.lib.render import TemplateNotFound
 from ckan.lib.search import SearchError, SearchQueryError, SearchIndexError
 from ckan.views import LazyView
-from ckan.views.api import CONTENT_TYPES
+
 
 NotFound = logic.NotFound
 NotAuthorized = logic.NotAuthorized
@@ -53,7 +56,13 @@ def _setup_template_variables(context, data_dict, package_type=None):
 
 def _get_pkg_template(template_type, package_type=None):
     pkg_plugin = lookup_package_plugin(package_type)
-    return getattr(pkg_plugin, template_type)()
+    method = getattr(pkg_plugin, template_type)
+    try:
+        return method(package_type)
+    except TypeError as err:
+        if u'takes 1' not in str(err) and u'takes exactly 1' not in str(err):
+            raise
+        return method()
 
 
 def _encode_params(params):
@@ -67,10 +76,9 @@ def url_with_params(url, params):
 
 
 def search_url(params, package_type=None):
-    if not package_type or package_type == u'dataset':
-        url = h.url_for(u'dataset.search')
-    else:
-        url = h.url_for(u'{0}_search'.format(package_type))
+    if not package_type:
+        package_type = u'dataset'
+    url = h.url_for(u'{0}.search'.format(package_type))
     return url_with_params(url, params)
 
 
@@ -84,13 +92,14 @@ def drill_down_url(alternative_url=None, **by):
 
 
 def remove_field(package_type, key, value=None, replace=None):
+    if not package_type:
+        package_type = u'dataset'
+    url = h.url_for(u'{0}.search'.format(package_type))
     return h.remove_url_param(
         key,
         value=value,
         replace=replace,
-        controller=u'dataset',
-        action=u'search',
-        alternative_url=package_type
+        alternative_url=url
     )
 
 
@@ -140,10 +149,9 @@ def _form_save_redirect(pkg_name, action, package_type=None):
     if url:
         url = url.replace(u'<NAME>', pkg_name)
     else:
-        if package_type is None or package_type == u'dataset':
-            url = h.url_for(u'dataset.read', id=pkg_name)
-        else:
-            url = h.url_for(u'{0}_read'.format(package_type), id=pkg_name)
+        if not package_type:
+            package_type = u'dataset'
+        url = h.url_for(u'{0}.read'.format(package_type), id=pkg_name)
     return h.redirect_to(url)
 
 
@@ -156,6 +164,41 @@ def _get_package_type(id):
     if pkg:
         return pkg.type or u'dataset'
     return None
+
+
+def _get_search_details():
+    fq = u''
+
+    # fields_grouped will contain a dict of params containing
+    # a list of values eg {u'tags':[u'tag1', u'tag2']}
+
+    fields = []
+    fields_grouped = {}
+    search_extras = MultiDict()
+
+    for (param, value) in request.args.items(multi=True):
+        if param not in [u'q', u'page', u'sort'] \
+                and len(value) and not param.startswith(u'_'):
+            if not param.startswith(u'ext_'):
+                fields.append((param, value))
+                fq += u' %s:"%s"' % (param, value)
+                if param not in fields_grouped:
+                    fields_grouped[param] = [value]
+                else:
+                    fields_grouped[param].append(value)
+            else:
+                search_extras.update({param: value})
+
+    search_extras = dict([
+        (k, v[0]) if len(v) == 1 else (k, v)
+        for k, v in search_extras.lists()
+    ])
+    return {
+        u'fields': fields,
+        u'fields_grouped': fields_grouped,
+        u'fq': fq,
+        u'search_extras': search_extras,
+    }
 
 
 def search(package_type):
@@ -201,89 +244,74 @@ def search(package_type):
     search_url_params = urlencode(_encode_params(params_nopage))
     extra_vars[u'search_url_params'] = search_url_params
 
+    details = _get_search_details()
+    extra_vars[u'fields'] = details[u'fields']
+    extra_vars[u'fields_grouped'] = details[u'fields_grouped']
+    fq = details[u'fq']
+    search_extras = details[u'search_extras']
+
+    context = {
+        u'model': model,
+        u'session': model.Session,
+        u'user': g.user,
+        u'for_view': True,
+        u'auth_user_obj': g.userobj
+    }
+
+    # Unless changed via config options, don't show other dataset
+    # types any search page. Potential alternatives are do show them
+    # on the default search page (dataset) or on one other search page
+    search_all_type = config.get(u'ckan.search.show_all_types', u'dataset')
+    search_all = False
+
     try:
-        # fields_grouped will contain a dict of params containing
-        # a list of values eg {u'tags':[u'tag1', u'tag2']}
+        # If the "type" is set to True or False, convert to bool
+        # and we know that no type was specified, so use traditional
+        # behaviour of applying this only to dataset type
+        search_all = asbool(search_all_type)
+        search_all_type = u'dataset'
+    # Otherwise we treat as a string representing a type
+    except ValueError:
+        search_all = True
 
-        extra_vars[u'fields'] = fields = []
-        extra_vars[u'fields_grouped'] = fields_grouped = {}
-        search_extras = {}
-        fq = u''
-        for (param, value) in request.args.items():
-            if param not in [u'q', u'page', u'sort'] \
-                    and len(value) and not param.startswith(u'_'):
-                if not param.startswith(u'ext_'):
-                    fields.append((param, value))
-                    fq += u' %s:"%s"' % (param, value)
-                    if param not in fields_grouped:
-                        fields_grouped[param] = [value]
-                    else:
-                        fields_grouped[param].append(value)
-                else:
-                    search_extras[param] = value
+    if not search_all or package_type != search_all_type:
+        # Only show datasets of this particular type
+        fq += u' +dataset_type:{type}'.format(type=package_type)
 
-        context = {
-            u'model': model,
-            u'session': model.Session,
-            u'user': g.user,
-            u'for_view': True,
-            u'auth_user_obj': g.userobj
-        }
+    facets = OrderedDict()
 
-        # Unless changed via config options, don't show other dataset
-        # types any search page. Potential alternatives are do show them
-        # on the default search page (dataset) or on one other search page
-        search_all_type = config.get(u'ckan.search.show_all_types', u'dataset')
-        search_all = False
+    default_facet_titles = {
+        u'organization': _(u'Organizations'),
+        u'groups': _(u'Groups'),
+        u'tags': _(u'Tags'),
+        u'res_format': _(u'Formats'),
+        u'license_id': _(u'Licenses'),
+    }
 
-        try:
-            # If the "type" is set to True or False, convert to bool
-            # and we know that no type was specified, so use traditional
-            # behaviour of applying this only to dataset type
-            search_all = asbool(search_all_type)
-            search_all_type = u'dataset'
-        # Otherwise we treat as a string representing a type
-        except ValueError:
-            search_all = True
+    for facet in h.facets():
+        if facet in default_facet_titles:
+            facets[facet] = default_facet_titles[facet]
+        else:
+            facets[facet] = facet
 
-        if not search_all or package_type != search_all_type:
-            # Only show datasets of this particular type
-            fq += u' +dataset_type:{type}'.format(type=package_type)
+    # Facet titles
+    for plugin in plugins.PluginImplementations(plugins.IFacets):
+        facets = plugin.dataset_facets(facets, package_type)
 
-        facets = OrderedDict()
-
-        default_facet_titles = {
-            u'organization': _(u'Organizations'),
-            u'groups': _(u'Groups'),
-            u'tags': _(u'Tags'),
-            u'res_format': _(u'Formats'),
-            u'license_id': _(u'Licenses'),
-        }
-
-        for facet in h.facets():
-            if facet in default_facet_titles:
-                facets[facet] = default_facet_titles[facet]
-            else:
-                facets[facet] = facet
-
-        # Facet titles
-        for plugin in plugins.PluginImplementations(plugins.IFacets):
-            facets = plugin.dataset_facets(facets, package_type)
-
-        extra_vars[u'facet_titles'] = facets
-        data_dict = {
-            u'q': q,
-            u'fq': fq.strip(),
-            u'facet.field': facets.keys(),
-            u'rows': limit,
-            u'start': (page - 1) * limit,
-            u'sort': sort_by,
-            u'extras': search_extras,
-            u'include_private': asbool(
-                config.get(u'ckan.search.default_include_private', True)
-            ),
-        }
-
+    extra_vars[u'facet_titles'] = facets
+    data_dict = {
+        u'q': q,
+        u'fq': fq.strip(),
+        u'facet.field': list(facets.keys()),
+        u'rows': limit,
+        u'start': (page - 1) * limit,
+        u'sort': sort_by,
+        u'extras': search_extras,
+        u'include_private': asbool(
+            config.get(u'ckan.search.default_include_private', True)
+        ),
+    }
+    try:
         query = get_action(u'package_search')(context, data_dict)
 
         extra_vars[u'sort_by_selected'] = query[u'sort']
@@ -297,7 +325,6 @@ def search(package_type):
         )
         extra_vars[u'search_facets'] = query[u'search_facets']
         extra_vars[u'page'].items = query[u'results']
-
     except SearchQueryError as se:
         # User's search parameters are invalid, in such a way that is not
         # achievable with the web interface, so return a proper error to
@@ -319,7 +346,6 @@ def search(package_type):
 
     # FIXME: try to avoid using global variables
     g.search_facets_limits = {}
-
     for facet in extra_vars[u'search_facets'].keys():
         try:
             limit = int(
@@ -342,7 +368,7 @@ def search(package_type):
     extra_vars[u'dataset_type'] = package_type
 
     # TODO: remove
-    for key, value in extra_vars.iteritems():
+    for key, value in six.iteritems(extra_vars):
         setattr(g, key, value)
 
     return base.render(
@@ -401,6 +427,7 @@ def read(package_type, id):
         u'auth_user_obj': g.userobj
     }
     data_dict = {u'id': id, u'include_tracking': True}
+    activity_id = request.params.get(u'activity_id')
 
     # check if package exists
     try:
@@ -411,12 +438,50 @@ def read(package_type, id):
 
     g.pkg_dict = pkg_dict
     g.pkg = pkg
+    # NB templates should not use g.pkg, because it takes no account of
+    # activity_id
+
+    if activity_id:
+        # view an 'old' version of the package, as recorded in the
+        # activity stream
+        try:
+            activity = get_action(u'activity_show')(
+                context, {u'id': activity_id, u'include_data': True})
+        except NotFound:
+            base.abort(404, _(u'Activity not found'))
+        except NotAuthorized:
+            base.abort(403, _(u'Unauthorized to view activity data'))
+        current_pkg = pkg_dict
+        try:
+            pkg_dict = activity[u'data'][u'package']
+        except KeyError:
+            base.abort(404, _(u'Dataset not found'))
+        if u'id' not in pkg_dict or u'resources' not in pkg_dict:
+            log.info(u'Attempt to view unmigrated or badly migrated dataset '
+                     '{} {}'.format(id, activity_id))
+            base.abort(404, _(u'The detail of this dataset activity is not '
+                              'available'))
+        if pkg_dict[u'id'] != current_pkg[u'id']:
+            log.info(u'Mismatch between pkg id in activity and URL {} {}'
+                     .format(pkg_dict[u'id'], current_pkg[u'id']))
+            # the activity is not for the package in the URL - don't allow
+            # misleading URLs as could be malicious
+            base.abort(404, _(u'Activity not found'))
+        # The name is used lots in the template for links, so fix it to be
+        # the current one. It's not displayed to the user anyway.
+        pkg_dict[u'name'] = current_pkg[u'name']
+
+        # Earlier versions of CKAN only stored the package table in the
+        # activity, so add a placeholder for resources, or the template
+        # will crash.
+        pkg_dict.setdefault(u'resources', [])
 
     # if the user specified a package id, redirect to the package name
     if data_dict['id'] == pkg_dict['id'] and \
             data_dict['id'] != pkg_dict['name']:
-        return h.redirect_to(u'dataset.read',
-                             id=pkg_dict['name'])
+        return h.redirect_to(u'{}.read'.format(package_type),
+                             id=pkg_dict['name'],
+                             activity_id=activity_id)
 
     # can the resources be previewed?
     for resource in pkg_dict[u'resources']:
@@ -436,7 +501,9 @@ def read(package_type, id):
             template, {
                 u'dataset_type': package_type,
                 u'pkg_dict': pkg_dict,
-                u'pkg': pkg
+                u'pkg': pkg,  # NB deprecated - it is the current version of
+                              # the dataset, so ignores activity_id
+                u'is_activity_archive': bool(activity_id),
             }
         )
     except TemplateNotFound as e:
@@ -477,7 +544,6 @@ class CreateView(MethodView):
         context = self._prepare()
         is_an_update = False
         ckan_phase = request.form.get(u'_ckan_phase')
-
         try:
             data_dict = clean_dict(
                 dict_fns.unflatten(tuplize_dict(parse_params(request.form)))
@@ -506,7 +572,10 @@ class CreateView(MethodView):
                     )
 
                     # redirect to add dataset resources
-                    url = h.url_for(u'resource.new', id=pkg_dict[u'name'])
+                    url = h.url_for(
+                        u'{}_resource.new'.format(package_type),
+                        id=pkg_dict[u'name']
+                    )
                     return h.redirect_to(url)
                 # Make sure we don't index this dataset
                 if request.form[u'save'] not in [
@@ -522,7 +591,10 @@ class CreateView(MethodView):
 
             if ckan_phase:
                 # redirect to add dataset resources
-                url = h.url_for(u'resource.new', id=pkg_dict[u'name'])
+                url = h.url_for(
+                    u'{}_resource.new'.format(package_type),
+                    id=pkg_dict[u'name']
+                )
                 return h.redirect_to(url)
 
             return _form_save_redirect(
@@ -550,7 +622,11 @@ class CreateView(MethodView):
                 pkg_dict = get_action(u'package_show')(context, data_dict)
                 data_dict[u'state'] = pkg_dict[u'state']
                 return EditView().get(
-                    data_dict[u'id'], data_dict, errors, error_summary
+                    package_type,
+                    data_dict[u'id'],
+                    data_dict,
+                    errors,
+                    error_summary
                 )
             data_dict[u'state'] = u'none'
             return self.get(package_type, data_dict, errors, error_summary)
@@ -700,7 +776,7 @@ class EditView(MethodView):
             return base.abort(404, _(u'Dataset not found'))
         # are we doing a multiphase add?
         if data.get(u'state', u'').startswith(u'draft'):
-            g.form_action = h.url_for(u'dataset.new')
+            g.form_action = h.url_for(u'{}.new'.format(package_type))
             g.form_style = u'new'
 
             return CreateView().get(
@@ -781,7 +857,7 @@ class DeleteView(MethodView):
 
     def post(self, package_type, id):
         if u'cancel' in request.form:
-            return h.redirect_to(u'dataset.edit', id=id)
+            return h.redirect_to(u'{}.edit'.format(package_type), id=id)
         context = self._prepare()
         try:
             get_action(u'package_delete')(context, {u'id': id})
@@ -845,7 +921,7 @@ def follow(package_type, id):
             _(u"You are now following {0}").format(package_dict[u'title'])
         )
 
-    return h.redirect_to(u'dataset.read', id=id)
+    return h.redirect_to(u'{}.read'.format(package_type), id=id)
 
 
 def unfollow(package_type, id):
@@ -875,7 +951,7 @@ def unfollow(package_type, id):
             )
         )
 
-    return h.redirect_to(u'dataset.read', id=id)
+    return h.redirect_to(u'{}.read'.format(package_type), id=id)
 
 
 def followers(package_type, id=None):
@@ -966,7 +1042,7 @@ class GroupView(MethodView):
                 get_action(u'member_delete')(context, data_dict)
             except NotFound:
                 return base.abort(404, _(u'Group not found'))
-        return h.redirect_to(u'dataset.groups', id=id)
+        return h.redirect_to(u'{}.groups'.format(package_type), id=id)
 
     def get(self, package_type, id):
         context, pkg_dict = self._prepare(id)
@@ -1014,11 +1090,9 @@ def activity(package_type, id):
     try:
         pkg_dict = get_action(u'package_show')(context, data_dict)
         pkg = context[u'package']
-        package_activity_stream = get_action(u'package_activity_list_html')(
-            context, {
-                u'id': pkg_dict[u'id']
-            }
-        )
+        package_activity_stream = get_action(
+            u'package_activity_list')(
+            context, {u'id': pkg_dict[u'id']})
         dataset_type = pkg_dict[u'type'] or u'dataset'
     except NotFound:
         return base.abort(404, _(u'Dataset not found'))
@@ -1028,114 +1102,265 @@ def activity(package_type, id):
     # TODO: remove
     g.pkg_dict = pkg_dict
     g.pkg = pkg
-    g.package_activity_stream = package_activity_stream
 
     return base.render(
         u'package/activity.html', {
             u'dataset_type': dataset_type,
             u'pkg_dict': pkg_dict,
             u'pkg': pkg,
-            u'package_activity_stream': package_activity_stream
+            u'activity_stream': package_activity_stream,
+            u'id': id,  # i.e. package's current name
         }
     )
 
 
-def history(package_type, id):
-    if u'diff' in request.args or u'selected1' in request.args:
-        try:
-            params = {
-                u'id': request.args.getone(u'pkg_name'),
-                u'diff': request.args.getone(u'selected1'),
-                u'oldid': request.args.getone(u'selected2'),
-            }
-        except KeyError:
-            if u'pkg_name' in dict(request.args):
-                id = request.args.getone(u'pkg_name')
-            g.error = \
-                _(u'Select two revisions before doing the comparison.')
-        else:
-            params[u'diff_entity'] = u'package'
-            return h.redirect_to(
-                controller=u'revision', action=u'diff', **params
-            )
+def changes(id, package_type=None):
+    '''
+    Shows the changes to a dataset in one particular activity stream item.
+    '''
+    activity_id = id
+    context = {
+        u'model': model, u'session': model.Session,
+        u'user': g.user, u'auth_user_obj': g.userobj
+    }
+    try:
+        activity_diff = get_action(u'activity_diff')(
+            context, {u'id': activity_id, u'object_type': u'package',
+                      u'diff_type': u'html'})
+    except NotFound as e:
+        log.info(u'Activity not found: {} - {}'.format(str(e), activity_id))
+        return base.abort(404, _(u'Activity not found'))
+    except NotAuthorized:
+        return base.abort(403, _(u'Unauthorized to view activity data'))
+
+    # 'pkg_dict' needs to go to the templates for page title & breadcrumbs.
+    # Use the current version of the package, in case the name/title have
+    # changed, and we need a link to it which works
+    pkg_id = activity_diff[u'activities'][1][u'data'][u'package'][u'id']
+    current_pkg_dict = get_action(u'package_show')(context, {u'id': pkg_id})
+    pkg_activity_list = get_action(u'package_activity_list')(
+        context, {
+            u'id': pkg_id,
+            u'limit': 100
+        }
+    )
+
+    return base.render(
+        u'package/changes.html', {
+            u'activity_diffs': [activity_diff],
+            u'pkg_dict': current_pkg_dict,
+            u'pkg_activity_list': pkg_activity_list,
+            u'dataset_type': current_pkg_dict[u'type'],
+        }
+    )
+
+
+def changes_multiple(package_type=None):
+    '''
+    Called when a user specifies a range of versions they want to look at
+    changes between. Verifies that the range is valid and finds the set of
+    activity diffs for the changes in the given version range, then
+    re-renders changes.html with the list.
+    '''
+
+    new_id = h.get_request_param(u'new_id')
+    old_id = h.get_request_param(u'old_id')
 
     context = {
-        u'model': model,
-        u'session': model.Session,
-        u'user': g.user,
-        u'auth_user_obj': g.userobj,
-        u'for_view': True
+        u'model': model, u'session': model.Session,
+        u'user': g.user, u'auth_user_obj': g.userobj
     }
-    data_dict = {u'id': id}
-    try:
-        g.pkg_dict = get_action(u'package_show')(context, data_dict)
-        g.pkg_revisions = get_action(u'package_revision_list')(
-            context, data_dict
-        )
-        # TODO: remove
-        # Still necessary for the authz check in group/layout.html
-        g.pkg = context[u'package']
 
+    # check to ensure that the old activity is actually older than
+    # the new activity
+    old_activity = get_action(u'activity_show')(context, {
+        u'id': old_id,
+        u'include_data': False})
+    new_activity = get_action(u'activity_show')(context, {
+        u'id': new_id,
+        u'include_data': False})
+
+    old_timestamp = old_activity[u'timestamp']
+    new_timestamp = new_activity[u'timestamp']
+
+    t1 = datetime.strptime(old_timestamp, u'%Y-%m-%dT%H:%M:%S.%f')
+    t2 = datetime.strptime(new_timestamp, u'%Y-%m-%dT%H:%M:%S.%f')
+
+    time_diff = t2 - t1
+    # if the time difference is negative, just return the change that put us
+    # at the more recent ID we were just looking at
+    # TODO: do something better here - go back to the previous page,
+    # display a warning that the user can't look at a sequence where
+    # the newest item is older than the oldest one, etc
+    if time_diff.total_seconds() < 0:
+        return changes(h.get_request_param(u'current_new_id'))
+
+    done = False
+    current_id = new_id
+    diff_list = []
+
+    while not done:
+        try:
+            activity_diff = get_action(u'activity_diff')(
+                context, {
+                    u'id': current_id,
+                    u'object_type': u'package',
+                    u'diff_type': u'html'})
+        except NotFound as e:
+            log.info(
+                u'Activity not found: {} - {}'.format(str(e), current_id)
+            )
+            return base.abort(404, _(u'Activity not found'))
+        except NotAuthorized:
+            return base.abort(403, _(u'Unauthorized to view activity data'))
+
+        diff_list.append(activity_diff)
+
+        if activity_diff['activities'][0]['id'] == old_id:
+            done = True
+        else:
+            current_id = activity_diff['activities'][0]['id']
+
+    pkg_id = diff_list[0][u'activities'][1][u'data'][u'package'][u'id']
+    current_pkg_dict = get_action(u'package_show')(context, {u'id': pkg_id})
+    pkg_activity_list = get_action(u'package_activity_list')(context, {
+        u'id': pkg_id,
+        u'limit': 100})
+
+    return base.render(
+        u'package/changes.html', {
+            u'activity_diffs': diff_list,
+            u'pkg_dict': current_pkg_dict,
+            u'pkg_activity_list': pkg_activity_list,
+            u'dataset_type': current_pkg_dict[u'type'],
+        }
+    )
+
+
+def collaborators_read(package_type, id):
+    context = {u'model': model, u'user': g.user}
+    data_dict = {u'id': id}
+
+    try:
+        check_access(u'package_collaborator_list', context, data_dict)
+        # needed to ckan_extend package/edit_base.html
+        pkg_dict = get_action(u'package_show')(context, data_dict)
     except NotAuthorized:
-        return base.abort(403, _(u'Unauthorized to read package %s') % u'')
+        message = _(u'Unauthorized to read collaborators {}').format(id)
+        return base.abort(401, message)
     except NotFound:
         return base.abort(404, _(u'Dataset not found'))
 
-    format = request.args.get(u'format', u'')
-    if format == u'atom':
-        # Generate and return Atom 1.0 document.
-        from webhelpers.feedgenerator import Atom1Feed
-        feed = Atom1Feed(
-            title=_(u'CKAN Dataset Revision History'),
-            link=h.url_for(
-                controller=u'revision', action=u'read', id=g.pkg_dict[u'name']
-            ),
-            description=_(u'Recent changes to CKAN Dataset: ') +
-            (g.pkg_dict[u'title'] or u''),
-            language=text_type(i18n.get_lang()),
-        )
-        for revision_dict in g.pkg_revisions:
-            revision_date = h.date_str_to_datetime(revision_dict[u'timestamp'])
-            try:
-                dayHorizon = int(request.args.get(u'days'))
-            except Exception:
-                dayHorizon = 30
-            dayAge = (datetime.datetime.now() - revision_date).days
-            if dayAge >= dayHorizon:
-                break
-            if revision_dict[u'message']:
-                item_title = u'%s' % revision_dict[u'message'].\
-                    split(u'\n')[0]
-            else:
-                item_title = u'%s' % revision_dict[u'id']
-            item_link = h.url_for(
-                controller=u'revision',
-                action=u'read',
-                id=revision_dict[u'id']
-            )
-            item_description = _(u'Log message: ')
-            item_description += u'%s' % (revision_dict[u'message'] or u'')
-            item_author_name = revision_dict[u'author']
-            item_pubdate = revision_date
-            feed.add_item(
-                title=item_title,
-                link=item_link,
-                description=item_description,
-                author_name=item_author_name,
-                pubdate=item_pubdate,
-            )
-        response = make_response(feed.writeString(u'utf-8'))
-        response.headers[u'Content-Type'] = u'application/atom+xml'
-        return response
+    return base.render(u'package/collaborators/collaborators.html', {
+        u'pkg_dict': pkg_dict})
 
-    package_type = g.pkg_dict[u'type'] or u'dataset'
 
-    return base.render(
-        _get_pkg_template(
-            u'history_template', g.pkg_dict.get(u'type', package_type)
-        ),
-        extra_vars={u'dataset_type': package_type}
-    )
+def collaborator_delete(package_type, id, user_id):
+    context = {u'model': model, u'user': g.user}
+
+    try:
+        get_action(u'package_collaborator_delete')(context, {
+            u'id': id,
+            u'user_id': user_id
+        })
+    except NotAuthorized:
+        message = _(u'Unauthorized to delete collaborators {}').format(id)
+        return base.abort(401, _(message))
+    except NotFound as e:
+        return base.abort(404, _(e.message))
+
+    h.flash_success(_(u'User removed from collaborators'))
+
+    return h.redirect_to(u'dataset.collaborators_read', id=id)
+
+
+class CollaboratorEditView(MethodView):
+
+    def post(self, package_type, id):
+        context = {u'model': model, u'user': g.user}
+
+        try:
+            form_dict = logic.clean_dict(
+                dict_fns.unflatten(
+                    logic.tuplize_dict(
+                        logic.parse_params(request.form))))
+
+            user = get_action(u'user_show')(
+                context, {u'id': form_dict[u'username']}
+            )
+
+            data_dict = {
+                u'id': id,
+                u'user_id': user[u'id'],
+                u'capacity': form_dict[u'capacity']
+            }
+
+            get_action(u'package_collaborator_create')(
+                context, data_dict)
+
+        except dict_fns.DataError:
+            return base.abort(400, _(u'Integrity Error'))
+        except NotAuthorized:
+            message = _(u'Unauthorized to edit collaborators {}').format(id)
+            return base.abort(401, _(message))
+        except NotFound as e:
+            h.flash_error(_(u'User not found'))
+            return h.redirect_to(u'dataset.new_collaborator', id=id)
+        except ValidationError as e:
+            h.flash_error(e.error_summary)
+            return h.redirect_to(u'dataset.new_collaborator', id=id)
+        else:
+            h.flash_success(_(u'User added to collaborators'))
+
+        return h.redirect_to(u'dataset.collaborators_read', id=id)
+
+    def get(self, package_type, id):
+        context = {u'model': model, u'user': g.user}
+        data_dict = {u'id': id}
+
+        try:
+            check_access(u'package_collaborator_list', context, data_dict)
+            # needed to ckan_extend package/edit_base.html
+            pkg_dict = get_action(u'package_show')(context, data_dict)
+        except NotAuthorized:
+            message = u'Unauthorized to read collaborators {}'.format(id)
+            return base.abort(401, _(message))
+        except NotFound:
+            return base.abort(404, _(u'Resource not found'))
+
+        user = request.params.get(u'user_id')
+        user_capacity = u'member'
+
+        if user:
+            collaborators = get_action(u'package_collaborator_list')(
+                context, data_dict)
+            for c in collaborators:
+                if c[u'user_id'] == user:
+                    user_capacity = c[u'capacity']
+            user = get_action(u'user_show')(context, {u'id': user})
+
+        capacities = []
+        if authz.check_config_permission(u'allow_admin_collaborators'):
+            capacities.append({u'name': u'admin', u'value': u'admin'})
+        capacities.extend([
+            {u'name': u'editor', u'value': u'editor'},
+            {u'name': u'member', u'value': u'member'}
+        ])
+
+        extra_vars = {
+            u'capacities': capacities,
+            u'user_capacity': user_capacity,
+            u'user': user,
+            u'pkg_dict': pkg_dict,
+        }
+
+        return base.render(
+            u'package/collaborators/collaborator_new.html', extra_vars)
+
+
+# deprecated
+def history(package_type, id):
+    return h.redirect_to(u'{}.activity'.format(package_type), id=id)
 
 
 def register_dataset_plugin_rules(blueprint):
@@ -1160,7 +1385,10 @@ def register_dataset_plugin_rules(blueprint):
         u'/groups/<id>', view_func=GroupView.as_view(str(u'groups'))
     )
     blueprint.add_url_rule(u'/activity/<id>', view_func=activity)
+    blueprint.add_url_rule(u'/changes/<id>', view_func=changes)
     blueprint.add_url_rule(u'/<id>/history', view_func=history)
+
+    blueprint.add_url_rule(u'/changes_multiple', view_func=changes_multiple)
 
     # Duplicate resource create and edit for backward compatibility. Note,
     # we cannot use resource.CreateView directly here, because of
@@ -1179,6 +1407,24 @@ def register_dataset_plugin_rules(blueprint):
         )
 
     )
+
+    if authz.check_config_permission(u'allow_dataset_collaborators'):
+        blueprint.add_url_rule(
+            rule=u'/collaborators/<id>',
+            view_func=collaborators_read,
+            methods=['GET', ]
+        )
+
+        blueprint.add_url_rule(
+            rule=u'/collaborators/<id>/new',
+            view_func=CollaboratorEditView.as_view(str(u'new_collaborator')),
+            methods=[u'GET', u'POST', ]
+        )
+
+        blueprint.add_url_rule(
+            rule=u'/collaborators/<id>/delete/<user_id>',
+            view_func=collaborator_delete, methods=['POST', ]
+        )
 
 
 register_dataset_plugin_rules(dataset)

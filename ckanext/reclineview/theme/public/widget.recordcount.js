@@ -20,7 +20,11 @@ my.RecordCount = Backbone.View.extend({
 
   render: function() {
     var tmplData = this.model.toTemplateJSON();
-    tmplData.recordCount = tmplData.recordCount || 'Unknown number of';
+    if (tmplData.recordCount) {
+      tmplData.recordCount = tmplData.recordCount.toLocaleString();
+    } else {
+      tmplData.recordCount = 'Unknown number of';
+    }
 	if (tmplData.recordCount==1) {
       tmplData.record = 'record';
     } else {

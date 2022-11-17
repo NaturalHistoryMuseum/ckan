@@ -22,7 +22,7 @@ this.ckan.module('resource-reorder', function($) {
         '</div>'
       ].join('\n'),
       handle: [
-        '<a href="javascript:;" class="handle" aria-label="Click and drag this to move the resource up or down in the list">',
+        '<a href="javascript:;" class="handle" aria-label="Click and drag this to move the resource up or down in the list">',,
         '<i class="fa fa-arrows"></i>',
         '</a>'
       ].join('\n'),

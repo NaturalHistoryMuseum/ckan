@@ -5,6 +5,7 @@
 # 
 # Translators:
 # Adrià Mercader <adria.mercader@okfn.org>, 2020
+# Patricio Del Boca <patriciodelboca@gmail.com>, 2021
 # 
 #, fuzzy
 msgid ""
@@ -13,14 +14,14 @@ msgstr ""
 "Report-Msgid-Bugs-To: EMAIL@ADDRESS\n"
 "POT-Creation-Date: 2020-07-21 11:43+0200\n"
 "PO-Revision-Date: 2020-07-09 15:07+0000\n"
-"Last-Translator: Adrià Mercader <adria.mercader@okfn.org>, 2020\n"
+"Last-Translator: Patricio Del Boca <patriciodelboca@gmail.com>, 2021\n"
 "Language-Team: Spanish (Argentina) (https://www.transifex.com/okfn/teams/11162/es_AR/)\n"
 "MIME-Version: 1.0\n"
 "Content-Type: text/plain; charset=UTF-8\n"
 "Content-Transfer-Encoding: 8bit\n"
 "Generated-By: Babel 2.7.0\n"
 "Language: es_AR\n"
-"Plural-Forms: nplurals=2; plural=(n != 1);\n"
+"Plural-Forms: nplurals=3; plural=n == 1 ? 0 : n != 0 && n % 1000000 == 0 ? 1 : 2;\n"
 
 #: ckanext/audioview/plugin.py:25 ckanext/audioview/plugin.py:30
 msgid "Audio"
@@ -464,6 +465,7 @@ msgid "{num} Dataset"
 msgid_plural "{num} Datasets"
 msgstr[0] "{num} Conjunto de Datos"
 msgstr[1] "{num} Conjuntos de Datos"
+msgstr[2] "{num} Conjuntos de Datos"
 
 #: ckan/templates/group/snippets/group_item.html:34
 #: ckan/templates/organization/snippets/organization_item.html:33
@@ -1429,6 +1431,7 @@ msgid "{n} new activity from {site_title}"
 msgid_plural "{n} new activities from {site_title}"
 msgstr[0] "{n} nueva actividad en {site_title}"
 msgstr[1] "{n} nuevas actividades en {site_title}"
+msgstr[2] "{n} nuevas actividades en {site_title}"
 
 #: ckan/lib/formatters.py:49
 msgid "Just now"
@@ -1516,12 +1519,14 @@ msgid "{number} view"
 msgid_plural "{number} views"
 msgstr[0] "{number} vista"
 msgstr[1] "{number} vistas"
+msgstr[2] "{number} vistas"
 
 #: ckan/lib/helpers.py:2098
 msgid "{number} recent view"
 msgid_plural "{number} recent views"
 msgstr[0] "{number} vista reciente"
 msgstr[1] "{number} vistas recientes"
+msgstr[2] "{number} vistas recientes"
 
 #: ckan/lib/mailer.py:58
 #, python-format
@@ -1898,7 +1903,7 @@ msgstr "La valoración debe ser entre %i y %i."
 #: ckan/logic/action/create.py:1175
 msgid "Error sending the invite email, the user was not created: {0}"
 msgstr ""
-"Error enviando una invitación por mail, el usuario no está creado: {0}"
+"Error enviando la invitación por mail, el usuario no ha sido creado: {0}"
 
 #: ckan/logic/action/create.py:1349 ckan/logic/action/create.py:1356
 msgid "You must be logged in to follow users"
@@ -2352,6 +2357,7 @@ msgid "Input is too short, must be at least one character"
 msgid_plural "Input is too short, must be at least %(num)d characters"
 msgstr[0] "Ingreso es demasiado corto, debe tener al menos un carácter"
 msgstr[1] "Ingreso es demasiado corto, debe tener al menos %(num)d carácteres"
+msgstr[2] "Ingreso es demasiado corto, debe tener al menos %(num)d carácteres"
 
 #: ckan/public/base/javascript/modules/basic-form.js:4
 #: ckan/public/base/javascript/modules/basic-form.min.js:1
@@ -2597,6 +2603,7 @@ msgid "Dashboard (%(num)d new item)"
 msgid_plural "Dashboard (%(num)d new items)"
 msgstr[0] "Panel de Control (%(num)d nuevo elemento)"
 msgstr[1] "Panel de Control (%(num)d nuevos elementos)"
+msgstr[2] "Panel de Control (%(num)d nuevos elementos)"
 
 #: ckan/templates/header.html:27 ckan/templates/user/dashboard.html:6
 msgid "Dashboard"
@@ -3421,6 +3428,7 @@ msgid "{count} member"
 msgid_plural "{count} members"
 msgstr[0] "{count} miembro"
 msgstr[1] "{count} miembros"
+msgstr[2] "{count} miembros"
 
 #: ckan/templates/organization/new.html:3
 #: ckan/templates/organization/new.html:5
@@ -3869,6 +3877,7 @@ msgid "{count} collaborator"
 msgid_plural "{count} collaborators"
 msgstr[0] ""
 msgstr[1] ""
+msgstr[2] ""
 
 #: ckan/templates/package/snippets/additional_info.html:2
 #: ckan/templates/snippets/additional_info.html:7
@@ -4286,6 +4295,7 @@ msgid "{number} dataset found for \"{query}\""
 msgid_plural "{number} datasets found for \"{query}\""
 msgstr[0] "{number} conjunto de datos encontrado para \"{query}\""
 msgstr[1] "{number} conjuntos de datos encontrados para \"{query}\""
+msgstr[2] "{number} conjuntos de datos encontrados para \"{query}\""
 
 #: ckan/templates/snippets/search_result_text.html:16
 msgid "No datasets found for \"{query}\""
@@ -4296,6 +4306,7 @@ msgid "{number} dataset found"
 msgid_plural "{number} datasets found"
 msgstr[0] "{number} conjunto de datos encontrado"
 msgstr[1] "{number} conjuntos de datos encontrados"
+msgstr[2] "{number} conjuntos de datos encontrados"
 
 #: ckan/templates/snippets/search_result_text.html:18
 msgid "No datasets found"
@@ -4306,6 +4317,7 @@ msgid "{number} group found for \"{query}\""
 msgid_plural "{number} groups found for \"{query}\""
 msgstr[0] "{number} grupo encontrado para \"{query}\""
 msgstr[1] "{number} grupos encontrados para \"{query}\""
+msgstr[2] "{number} grupos encontrados para \"{query}\""
 
 #: ckan/templates/snippets/search_result_text.html:22
 msgid "No groups found for \"{query}\""
@@ -4316,6 +4328,7 @@ msgid "{number} group found"
 msgid_plural "{number} groups found"
 msgstr[0] "{number} grupo encontrado"
 msgstr[1] "{number} grupos encontrados"
+msgstr[2] "{number} grupos encontrados"
 
 #: ckan/templates/snippets/search_result_text.html:24
 msgid "No groups found"
@@ -4326,6 +4339,7 @@ msgid "{number} organization found for \"{query}\""
 msgid_plural "{number} organizations found for \"{query}\""
 msgstr[0] "{number} organización encontrada para \"{query}\""
 msgstr[1] "{number} organizaciones encontradas para \"{query}\""
+msgstr[2] "{number} organizaciones encontradas para \"{query}\""
 
 #: ckan/templates/snippets/search_result_text.html:28
 msgid "No organizations found for \"{query}\""
@@ -4336,6 +4350,7 @@ msgid "{number} organization found"
 msgid_plural "{number} organizations found"
 msgstr[0] "{number} organización encontrada"
 msgstr[1] "{number} organizaciones encontradas"
+msgstr[2] "{number} organizaciones encontradas"
 
 #: ckan/templates/snippets/search_result_text.html:30
 msgid "No organizations found"
@@ -4638,8 +4653,8 @@ msgstr ""
 
 #: ckan/templates/snippets/changes/resource_desc.html:5
 msgid ""
-"Updated description of resource {resource_link} in {pkg_link} to <br class"
-"=\"line-height2\"><blockquote>{new_desc}</blockquote>"
+"Updated description of resource {resource_link} in {pkg_link} to <br "
+"class=\"line-height2\"><blockquote>{new_desc}</blockquote>"
 msgstr ""
 
 #: ckan/templates/snippets/changes/resource_desc.html:22
@@ -4648,9 +4663,9 @@ msgstr ""
 
 #: ckan/templates/snippets/changes/resource_desc.html:38
 msgid ""
-"Updated description of resource {resource_link} in {pkg_link} from <br class"
-"=\"line-height2\"><blockquote>{old_desc}</blockquote> to <br class=\"line-"
-"height2\"><blockquote>{new_desc}</blockquote>"
+"Updated description of resource {resource_link} in {pkg_link} from <br "
+"class=\"line-height2\"><blockquote>{old_desc}</blockquote> to <br "
+"class=\"line-height2\"><blockquote>{new_desc}</blockquote>"
 msgstr ""
 
 #: ckan/templates/snippets/changes/resource_extras.html:5

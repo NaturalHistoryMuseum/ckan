@@ -16,12 +16,10 @@ import pprint
 import copy
 import uuid
 
-from paste.deploy import converters
-
 import dominate.tags as dom_tags
 from markdown import markdown
 from bleach import clean as bleach_clean, ALLOWED_TAGS, ALLOWED_ATTRIBUTES
-from ckan.common import config, is_flask_request
+from ckan.common import config, is_flask_request, asbool
 from flask import redirect as _flask_redirect
 from flask import _request_ctx_stack
 from flask import url_for as _flask_default_url_for
@@ -424,16 +422,29 @@ def _url_for_flask(*args, **kw):
             kw.pop('host', None)
             kw.pop('protocol', None)
             if kw:
-                my_url += '?'
                 query_args = []
                 for key, val in kw.items():
                     if isinstance(val, (list, tuple)):
                         for value in val:
+                            if value is None:
+                                continue
                             query_args.append(
-                                u'{}={}'.format(quote(key), quote(value)))
+                                u'{}={}'.format(
+                                    quote(str(key)),
+                                    quote(str(value))
+                                )
+                            )
                     else:
+                        if val is None:
+                            continue
                         query_args.append(
-                            u'{}={}'.format(quote(key), quote(val)))
+                            u'{}={}'.format(
+                                quote(str(key)),
+                                quote(str(val))
+                            )
+                        )
+                if query_args:
+                    my_url += '?'
                 my_url += '&'.join(query_args)
         else:
             raise
@@ -643,7 +654,7 @@ def full_current_url():
 @core_helper
 def current_url():
     ''' Returns current url unquoted'''
-    return unquote(request.environ['CKAN_CURRENT_URL'])
+    return request.environ['CKAN_CURRENT_URL']
 
 
 @core_helper
@@ -673,6 +684,11 @@ def lang_native_name(lang=None):
 def is_rtl_language():
     return lang() in config.get('ckan.i18n.rtl_languages',
                                 'he ar fa_IR').split()
+
+
+@core_helper
+def get_rtl_theme():
+    return config.get('ckan.i18n.rtl_theme', 'css/main-rtl')
 
 
 @core_helper
@@ -1155,8 +1171,9 @@ def get_facet_items_dict(
     if search_facets is None:
         search_facets = getattr(c, u'search_facets', None)
 
-    if not search_facets or not search_facets.get(
-            facet, {}).get('items'):
+    if not search_facets \
+       or not isinstance(search_facets, dict) \
+       or not search_facets.get(facet, {}).get('items'):
         return []
     facets = []
     for facet_item in search_facets.get(facet)['items']:
@@ -1206,7 +1223,7 @@ def has_more_facets(facet, search_facets, limit=None, exclude_active=False):
             facets.append(dict(active=False, **facet_item))
         elif not exclude_active:
             facets.append(dict(active=True, **facet_item))
-    if c.search_facets_limits and limit is None:
+    if getattr(c, 'search_facets_limits', None) and limit is None:
         limit = c.search_facets_limits.get(facet)
     if limit is not None and len(facets) > limit:
         return True
@@ -1516,6 +1533,42 @@ def gravatar(email_hash, size=100, default=None):
                    )
 
 
+_PLAUSIBLE_HOST_IDNA = re.compile(r'^[-\w.:\[\]]*$')
+
+
+@core_helper
+def sanitize_url(url):
+    '''
+    Return a sanitized version of a user-provided url for use in an
+    <a href> or <img src> attribute, e.g.:
+
+    <a href="{{ h.sanitize_url(user_link) }}">
+
+    Sanitizing urls is tricky. This is a best-effort to produce something
+    valid from the sort of text users might paste into a web form, not
+    intended to cover all possible valid edge-case urls.
+
+    On parsing errors an empty string will be returned.
+    '''
+    try:
+        parsed_url = urlparse(url)
+        netloc = parsed_url.netloc.encode('idna').decode('ascii')
+        if not _PLAUSIBLE_HOST_IDNA.match(netloc):
+            return ''
+        # quote with allowed characters from
+        # https://www.ietf.org/rfc/rfc3986.txt
+        parsed_url = parsed_url._replace(
+            scheme=quote(unquote(parsed_url.scheme), '+'),
+            path=quote(unquote(parsed_url.path), "/"),
+            query=quote(unquote(parsed_url.query), "?/&="),
+            params=quote(unquote(parsed_url.params), "?/&="),
+            fragment=quote(unquote(parsed_url.fragment), "?/&="),
+        )
+        return urlunparse(parsed_url)
+    except ValueError:
+        return ''
+
+
 @core_helper
 def user_image(user_id, size=100):
     try:
@@ -1532,7 +1585,7 @@ def user_image(user_id, size=100):
         return literal('''<img src="{url}"
                        class="user-image"
                        width="{size}" height="{size}" alt="{alt}" />'''.format(
-            url=user_dict['image_display_url'],
+            url=sanitize_url(user_dict['image_display_url']),
             size=size,
             alt=user_dict['name']
         ))
@@ -2747,7 +2800,8 @@ def license_options(existing_license_id=None):
         license_ids.insert(0, existing_license_id)
     return [
         (license_id,
-         register[license_id].title if license_id in register else license_id)
+         _(register[license_id].title)
+            if license_id in register else license_id)
         for license_id in license_ids]
 
 
@@ -2757,8 +2811,16 @@ def get_translated(data_dict, field):
     try:
         return data_dict[field + u'_translated'][language]
     except KeyError:
-        val = data_dict.get(field, '')
-        return _(val) if val and isinstance(val, string_types) else val
+        pass
+
+    # Check the base language, en_GB->en
+    try:
+        base_language = language.split('_')[0]
+        if base_language != language:
+            return data_dict[field + u'_translated'][base_language]
+    except KeyError:
+        pass
+    return data_dict.get(field, '')
 
 
 @core_helper
@@ -2798,8 +2860,8 @@ core_helper(localised_filesize)
 core_helper(i18n.get_available_locales)
 core_helper(i18n.get_locales_dict)
 core_helper(literal)
-# Useful additions from the paste library.
-core_helper(converters.asbool)
+# Useful additions from the common module
+core_helper(asbool)
 # Useful additions from the stdlib.
 core_helper(urlencode)
 core_helper(include_asset)
@@ -2938,3 +3000,33 @@ def can_update_owner_org(package_dict, user_orgs=None):
         return True
 
     return False
+
+
+@core_helper
+def check_ckan_version(min_version, max_version):
+    """Return ``True`` if the CKAN version is greater than or equal to
+    ``min_version`` and less than or equal to ``max_version``,
+    return ``False`` otherwise.
+
+    If no ``min_version`` is given, just check whether the CKAN version is
+    less than or equal to ``max_version``.
+
+    If no ``max_version`` is given, just check whether the CKAN version is
+    greater than or equal to ``min_version``.
+
+    :param min_version: the minimum acceptable CKAN version,
+        eg. ``'2.1'``
+    :type min_version: string
+
+    :param max_version: the maximum acceptable CKAN version,
+        eg. ``'2.3'``
+    :type max_version: string
+
+    """
+    return p.toolkit.check_ckan_version(min_version=min_version,
+                                        max_version=max_version)
+
+
+@core_helper
+def csrf_input():
+    return ''

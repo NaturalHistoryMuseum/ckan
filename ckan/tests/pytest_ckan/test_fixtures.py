@@ -40,6 +40,12 @@ def test_with_plugins_is_able_to_run_with_stats():
     assert plugins.plugin_loaded(u"stats")
 
 
+@pytest.mark.ckan_config(u"ckan.site_url", u"https://example.org")
+@pytest.mark.usefixtures(u"with_request_context")
+def test_existing_ckan_config_mark_with_test_request(ckan_config):
+    assert ckan_config[u"ckan.site_url"] == u"https://example.org"
+
+
 class TestMethodLevelConfig(object):
     """Verify that config overrides work for individual methods.
     """
@@ -101,3 +107,18 @@ class TestCreateWithUpload(object):
         assert resource[u"url_type"] == u"upload"
         assert resource[u"format"] == u"TXT"
         assert resource[u"size"] == 11
+
+
+class TestMigrateDbFor(object):
+    @pytest.mark.ckan_config(u"ckan.plugins", u"example_database_migrations")
+    @pytest.mark.usefixtures(u"with_plugins", u"clean_db")
+    def test_migrations_applied(self, migrate_db_for):
+        import ckan.model as model
+        has_table = model.Session.bind.has_table
+        assert not has_table(u"example_database_migrations_x")
+        assert not has_table(u"example_database_migrations_y")
+
+        migrate_db_for(u"example_database_migrations")
+
+        assert has_table(u"example_database_migrations_x")
+        assert has_table(u"example_database_migrations_y")

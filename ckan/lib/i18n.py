@@ -41,6 +41,7 @@ import json
 import logging
 import os
 import os.path
+from io import open
 
 import six
 from babel import Locale
@@ -75,7 +76,7 @@ _JS_TRANSLATIONS_DIR = os.path.join(_CKAN_DIR, u'public', u'base', u'i18n')
 
 def get_ckan_i18n_dir():
     path = config.get(
-        u'ckan.i18n_directory', os.path.join(_CKAN_DIR, u'i18n'))
+        u'ckan.i18n_directory') or os.path.join(_CKAN_DIR, u'i18n')
     if os.path.isdir(os.path.join(path, u'i18n')):
         path = os.path.join(path, u'i18n')
 
@@ -351,9 +352,9 @@ def _build_js_translation(lang, source_filenames, entries, dest_filename):
                 ordered_plural = sorted(entry.msgstr_plural.items())
                 for order, msgstr in ordered_plural:
                     plural.append(msgstr)
-    with open(dest_filename, u'w') as f:
+    with open(dest_filename, u'w', encoding='utf-8') as f:
         s = json.dumps(result, sort_keys=True, indent=2, ensure_ascii=False)
-        f.write(six.ensure_str(s))
+        f.write(s)
 
 
 def build_js_translations():

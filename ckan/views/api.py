@@ -28,7 +28,7 @@ CONTENT_TYPES = {
     u'html': u'text/html;charset=utf-8',
     u'json': u'application/json;charset=utf-8',
     u'javascript': u'application/javascript;charset=utf-8',
-}
+    }
 
 API_REST_DEFAULT_VERSION = 1
 
@@ -71,7 +71,7 @@ def _finish(status_int, response_data=None,
             response_msg = response_data
         # Support JSONP callback.
         if (status_int == 200 and u'callback' in request.args and
-                request.method == u'GET'):
+            request.method == u'GET'):
             # escape callback to remove '<', '&', '>' chars
             callback = html.escape(request.args[u'callback'])
             response_msg = _wrap_jsonp(callback, response_msg)
@@ -256,16 +256,24 @@ def action(logic_function, ver=API_DEFAULT_VERSION):
     model.Session()._context = context
 
     return_dict = {u'help': url_for(u'api.action',
-                                    logic_function=u'help_show',
-                                    ver=ver,
-                                    name=logic_function,
-                                    _external=True,
-                                    )
-                   }
+                         logic_function=u'help_show',
+                         ver=ver,
+                         name=logic_function,
+                         _external=True,
+                         )
+        }
 
     # Get the request data
     try:
-        side_effect_free = getattr(function, u'side_effect_free', False)
+        # TODO: check if this alteration is necessary (not sure what has been merged upstream)
+        if function.__name__ == u'wrapped':
+            f = function.__closure__[0].cell_contents
+            if hasattr(f, u'args'):
+                f = f.args[0]
+        else:
+            f = function
+
+        side_effect_free = getattr(f, u'side_effect_free', False)
 
         request_data = _get_request_data(
             try_url_params=side_effect_free)
@@ -359,7 +367,7 @@ def get_api(ver=1):
 
     response_data = {
         u'version': ver
-    }
+        }
     return _finish_ok(response_data)
 
 

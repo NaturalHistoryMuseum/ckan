@@ -3140,11 +3140,40 @@ my.SlickGrid = Backbone.View.extend({
     _.bindAll(this, 'render', 'onRecordChanged');
     this.listenTo(this.model.records, 'add remove reset', this.render);
     this.listenTo(this.model.records, 'change', this.onRecordChanged);
+
+    this.listenTo(this.model, 'query:start', function() {
+      self.notify({loader: true, persist: true});
+    });
+
+    this.listenTo(this.model, 'query:done', function() {
+      self.clearNotifications();
+    });
+
+    this.listenTo(this.model, 'query:fail', function(error) {
+      self.clearNotifications();
+      var msg = '';
+      if (typeof(error) == 'string') {
+        msg = error;
+      } else if (typeof(error) == 'object') {
+        if (error.title) {
+          msg = error.title + ': ';
+        }
+        if (error.message) {
+          msg += error.message;
+        }
+      } else {
+        msg = 'There was an error querying the backend';
+      }
+      self.notify({message: msg, category: 'error', persist: true});
+    });
+
     var state = _.extend({
         hiddenColumns: [],
         columnsOrder: [],
         columnsSort: {},
         columnsWidth: [],
+        columnsTitle: [],
+        columnsToolTip: [],
         columnsEditor: [],
         options: {},
         fitColumns: false
@@ -3194,17 +3223,21 @@ my.SlickGrid = Backbone.View.extend({
     // custom formatter as default one escapes html
     // plus this way we distinguish between rendering/formatting and computed value (so e.g. sort still works ...)
     // row = row index, cell = cell index, value = value, columnDef = column definition, dataContext = full row values
-    var formatter = function(row, cell, value, columnDef, dataContext) {
-      if(columnDef.id == "del"){
-        return self.templates.deleterow
-      }
-      var field = self.model.fields.get(columnDef.id);
-      if (field.renderer) {
-        return  field.renderer(value, field, dataContext);
-      } else {
-        return  value
-      }
-    };
+    var formatter;
+    // Only define the formatter if there's no formatter factory defined
+    if (!('defaultFormatter' in options || 'formatterFactory' in options)) {
+      formatter = function (row, cell, value, columnDef, dataContext) {
+        if (columnDef.id == 'del') {
+          return self.templates.deleterow;
+        }
+        var field = self.model.fields.get(columnDef.id);
+        if (field.renderer) {
+          return field.renderer(value, field, dataContext);
+        } else {
+          return value;
+        }
+      };
+    }
 
     // we need to be sure that user is entering a valid  input , for exemple if
     // field is date type and field.format ='YY-MM-DD', we should be sure that
@@ -3264,6 +3297,14 @@ my.SlickGrid = Backbone.View.extend({
       var widthInfo = _.find(self.state.get('columnsWidth'),function(c){return c.column === field.id;});
       if (widthInfo){
         column.width = widthInfo.width;
+      }
+      var titleInfo = _.find(self.state.get('columnsTitle'),function(c){return c.column === field.id;});
+      if (titleInfo){
+        column.name = titleInfo.title;
+      }
+      var toolTipInfo = _.find(self.state.get('columnsToolTip'),function(c){return c.column === field.id;});
+      if (toolTipInfo) {
+        column.toolTip = toolTipInfo.value;
       }
       var editInfo = _.find(self.state.get('columnsEditor'),function(c){return c.column === field.id;});
       if (editInfo){
@@ -3354,6 +3395,11 @@ my.SlickGrid = Backbone.View.extend({
     });
 
     this.grid = new Slick.Grid(this.el, data, visibleColumns, options);
+
+    // Make the grid object available to other plugins, eg.
+    // jQuery('div.recline-slickgrid').get(0).grid
+    this.el.grid = this.grid;
+
     // Column sorting
     var sortInfo = this.model.queryState.get('sort');
     if (sortInfo){
@@ -3514,6 +3560,48 @@ my.SlickGrid = Backbone.View.extend({
 
   hide: function() {
     this.visible = false;
+  },
+
+  notify: function(flash) {
+    var tmplData = _.extend({
+      message: 'Loading',
+      category: 'warning',
+      loader: true
+      },
+      flash
+    );
+    var _template;
+    if (tmplData.loader) {
+      _template = ' \
+        <div class="alert alert-info alert-loader"> \
+          {{message}} \
+          <span class="notification-loader">&nbsp;</span> \
+        </div>';
+    } else {
+      _template = ' \
+        <div class="alert alert-{{category}} fade in" data-alert="alert"><a class="close" data-dismiss="alert" href="#">×</a> \
+          {{message}} \
+        </div>';
+    }
+    var _templated = $(Mustache.render(_template, tmplData));
+    _templated = $(_templated).appendTo($('.controls'));
+    if (!flash.persist) {
+      setTimeout(function() {
+        $(_templated).fadeOut(1000, function() {
+          $(this).remove();
+        });
+      }, 1000);
+    }
+  },
+
+  // ### clearNotifications
+  //
+  // Clear all existing notifications
+  clearNotifications: function() {
+    var $notifications = $('.controls .alert');
+    $notifications.fadeOut(1500, function() {
+      $(this).remove();
+    });
   }
 });
 
@@ -4238,9 +4326,9 @@ my.Pager = Backbone.View.extend({
   template: ' \
     <div class="pagination"> \
       <ul class="pagination"> \
-        <li class="prev action-pagination-update"><a href="" class="btn btn-default">&laquo;</a></li> \
-        <li class="page-range"><a><label for="from">From</label><input id="from" name="from" type="text" value="{{from}}" /> &ndash; <label for="to">To</label><input id="to" name="to" type="text" value="{{to}}" /> </a></li> \
-        <li class="next action-pagination-update"><a href="" class="btn btn-default">&raquo;</a></li> \
+        <li class="prev action-pagination-update"><a href="" class="btn btn-default" aria-label="Previous page">&laquo;</a></li> \
+        <li class="page-range"><a aria-label="from - to selection"><label for="from">From</label><input id="from" aria-label="from" name="from" type="text" value="{{from}}" /> &ndash; <label for="to">To</label><input id="to" aria-label="to" name="to" type="text" value="{{to}}" /> </a></li> \
+        <li class="next action-pagination-update"><a href="" class="btn btn-default" aria-label="Next page">&raquo;</a></li> \
       </ul> \
     </div> \
   ',

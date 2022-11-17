@@ -51,7 +51,8 @@
    */
   notify.initialize = function (element) {
     element = element instanceof jQuery ? element : jQuery(element);
-    return element.append(jQuery('<a class="close" href="#">&times;</a>')).alert();
+    return element.append(jQuery('<a class="close" aria-label="Dismiss message" href="#">&times;' +
+      '</a>')).alert();
   };
 
   // Initialize any alerts already on the page.

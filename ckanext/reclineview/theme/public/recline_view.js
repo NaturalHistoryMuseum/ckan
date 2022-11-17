@@ -1,4 +1,10 @@
 this.ckan.module('recline_view', function (jQuery) {
+  var NoRecordsView = Backbone.View.extend({
+    render: function(){
+      // TODO: i18n
+      this.$el.html('<div class="recline-norecords">No matching records</div>');
+    }
+  });
   return {
     options: {
       site_url: "",
@@ -19,7 +25,33 @@ this.ckan.module('recline_view', function (jQuery) {
       var resourceData = this.options.resource,
           resourceView = this.options.resourceView;
 
-      this.loadView(resourceData, resourceView);
+      setTimeout(this.waitForViews.bind(this, 0, resourceData, resourceView), 0);
+    },
+
+    /**
+     * This module relies on the existence of window.parent.ckan.views and
+     * window.parent.ckan.views.filters to operate properly and therefore we need to wait for those
+     * properties to become available. This function does just that, checking on a timeout loop
+     * every 50ms to see if the properties exist before calling the loadView function. If we attempt
+     * this check 100 or more times (more than 5 seconds) we give up and let the view load anyway.
+     *
+     * Sometimes this module loads before those properties are defined and therefore this module
+     * fails due to the race condition. This only happens/is far more likely to happen when used in
+     * an iframe where window.parent actually points to the parent rather than window.
+     *
+     * @param attempts the number of attempts at checking for the properties that we've done
+     * @param resourceData the resource data object as required by loadView
+     * @param resourceView the resource view object as required by loadView
+     */
+    waitForViews: function(attempts, resourceData, resourceView) {
+      if ((window.parent.ckan && window.parent.ckan.views && window.parent.ckan.views.filters) ||
+            attempts >= 100) {
+        // the properties exist or we've waited for 2 seconds, let's go!
+        this.loadView(resourceData, resourceView);
+      } else {
+        // the properties aren't there yet, wait 50ms and try again
+        setTimeout(this.waitForViews.bind(this, attempts + 1, resourceData, resourceView), 50);
+      }
     },
 
     loadView: function (resourceData, reclineView) {
@@ -73,6 +105,9 @@ this.ckan.module('recline_view', function (jQuery) {
       jQuery.each(filters, function (field,values) {
         query.addFilter({type: 'term', field: field, term: values});
       });
+      if (window.parent.ckan.views.filters._searchParams.q){
+          query.set({ q: window.parent.ckan.views.filters._searchParams.q });
+      }
 
       dataset.queryState.set(query.toJSON(), {silent: true});
 
@@ -97,7 +132,11 @@ this.ckan.module('recline_view', function (jQuery) {
           state,
           controls = [];
 
-      if(reclineView.view_type === "recline_graph_view") {
+      if(typeof(dataset.recordCount) == 'undefined' || dataset.recordCount == 0){
+        view = new NoRecordsView({
+          'model': dataset
+        });
+      } else if(reclineView.view_type === "recline_graph_view") {
         state = {
           "graphType": reclineView.graph_type,
           "group": reclineView.group,
@@ -125,7 +164,20 @@ this.ckan.module('recline_view', function (jQuery) {
         view = this._newDataExplorer(dataset, this.options.map_config);
       } else {
         // default to Grid
-        view = new recline.View.SlickGrid({model: dataset});
+        if (reclineView.state === undefined) {
+            reclineView.state = {}
+        }else{
+            // Loop through all properties that could be functions
+            // If they are defined, convert to func
+            jQuery.each(['defaultFormatter', 'formatterFactory', 'editorFactory'], function(i, value){
+                if(reclineView.state['gridOptions'][value] !== undefined){
+                    // String to func
+                    reclineView.state['gridOptions'][value] = window[reclineView.state['gridOptions'][value]];
+                }
+            });
+        }
+
+        view = new recline.View.SlickGrid({model: dataset, state: reclineView.state});
         controls = [
           new recline.View.Pager({model: view.model}),
           new recline.View.RecordCount({model: dataset}),

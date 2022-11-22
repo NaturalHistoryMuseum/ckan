@@ -93,7 +93,7 @@ def render_snippet(*template_names, **kw):
     for template_name in template_names:
         try:
             output = render(template_name, extra_vars=kw)
-            if config.get('debug'):
+            if asbool(config.get('debug')):
                 output = (
                     '\n<!-- Snippet %s start -->\n%s\n<!-- Snippet %s end -->'
                     '\n' % (template_name, output, template_name))
@@ -239,7 +239,7 @@ def _allow_caching(cache_force=None):
     if cache_force is not None:
         allow_cache = cache_force
     # Do not allow caching of pages for logged in users/flash messages etc.
-    elif _is_valid_session_cookie_data():
+    elif ('user' in c and c.user) or _is_valid_session_cookie_data():
         allow_cache = False
     # Tests etc.
     elif 'REMOTE_USER' in request.environ:

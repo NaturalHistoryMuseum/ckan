@@ -3168,16 +3168,16 @@ my.SlickGrid = Backbone.View.extend({
     });
 
     var state = _.extend({
-      hiddenColumns: [],
-      columnsOrder: [],
-      columnsSort: {},
-      columnsWidth: [],
-      columnsTitle: [],
-      columnsToolTip: [],
-      columnsEditor: [],
-      options: {},
-      fitColumns: false
-    }, modelEtc.state
+        hiddenColumns: [],
+        columnsOrder: [],
+        columnsSort: {},
+        columnsWidth: [],
+        columnsTitle: [],
+        columnsToolTip: [],
+        columnsEditor: [],
+        options: {},
+        fitColumns: false
+      }, modelEtc.state
 
     );
     this.state = new recline.Model.ObjectState(state);
@@ -3225,16 +3225,16 @@ my.SlickGrid = Backbone.View.extend({
     // row = row index, cell = cell index, value = value, columnDef = column definition, dataContext = full row values
     var formatter;
     // Only define the formatter if there's no formatter factory defined
-    if(!('defaultFormatter' in options || 'formatterFactory' in options)){
-      formatter = function(row, cell, value, columnDef, dataContext) {
-        if(columnDef.id == "del"){
-          return self.templates.deleterow
-      }
-      var field = self.model.fields.get(columnDef.id);
+    if (!('defaultFormatter' in options || 'formatterFactory' in options)) {
+      formatter = function (row, cell, value, columnDef, dataContext) {
+        if (columnDef.id == 'del') {
+          return self.templates.deleterow;
+        }
+        var field = self.model.fields.get(columnDef.id);
         if (field.renderer) {
-          return  field.renderer(value, field, dataContext);
+          return field.renderer(value, field, dataContext);
         } else {
-          return  value
+          return value;
         }
       };
     }

@@ -404,7 +404,7 @@ def default_user_schema(
         'reset_key': [ignore],
         'activity_streams_email_notifications': [ignore_missing,
                                                  boolean_validator],
-        'state': [ignore_missing],
+        'state': [ignore_missing, ignore_not_sysadmin],
         'image_url': [ignore_missing, unicode_safe],
         'image_display_url': [ignore_missing, unicode_safe],
         'plugin_extras': [ignore_missing, json_object, ignore_not_sysadmin],
@@ -414,11 +414,9 @@ def default_user_schema(
 @validator_args
 def user_new_form_schema(
         unicode_safe, user_both_passwords_entered,
-        user_password_validator, user_passwords_match,
-        email_is_unique):
+        user_password_validator, user_passwords_match):
     schema = default_user_schema()
 
-    schema['email'] = [email_is_unique]
     schema['password1'] = [text_type, user_both_passwords_entered,
                            user_password_validator, user_passwords_match]
     schema['password2'] = [text_type]
@@ -428,11 +426,10 @@ def user_new_form_schema(
 
 @validator_args
 def user_edit_form_schema(
-        ignore_missing, unicode_safe, user_both_passwords_entered,
-        user_password_validator, user_passwords_match, email_is_unique):
+        ignore_missing, unicode_safe, user_password_validator,
+        user_passwords_match):
     schema = default_user_schema()
 
-    schema['email'] = [email_is_unique]
     schema['password'] = [ignore_missing]
     schema['password1'] = [ignore_missing, unicode_safe,
                            user_password_validator, user_passwords_match]
@@ -450,8 +447,6 @@ def default_update_user_schema(
 
     schema['name'] = [
         ignore_missing, name_validator, user_name_validator, unicode_safe]
-    schema['email'] = [
-        not_empty, email_validator, email_is_unique, unicode_safe]
     schema['password'] = [
         user_password_validator, ignore_missing, unicode_safe]
 
@@ -469,9 +464,9 @@ def default_generate_apikey_user_schema(
 
 @validator_args
 def default_user_invite_schema(
-        not_empty, unicode_safe):
+        not_empty, email_validator, email_is_unique):
     return {
-        'email': [not_empty, text_type],
+        'email': [not_empty, email_validator, email_is_unique, text_type],
         'group_id': [not_empty],
         'role': [not_empty],
     }
@@ -746,7 +741,7 @@ def default_update_configuration_schema(
         'ckan.site_about': [ignore_missing, unicode_safe],
         'ckan.site_intro_text': [ignore_missing, unicode_safe],
         'ckan.site_custom_css': [ignore_missing, unicode_safe],
-        'ckan.main_css': [ignore_missing, unicode_safe],
+        'ckan.theme': [ignore_missing, unicode_safe],
         'ckan.homepage_style': [ignore_missing, is_positive_integer],
         'logo_upload': [ignore_missing, unicode_safe],
         'clear_logo_upload': [ignore_missing, unicode_safe],

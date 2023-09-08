@@ -94,7 +94,7 @@ class AuthFunctions:
 
         # Then overwrite them with any specific ones in the plugins:
         resolved_auth_function_plugins: dict[str, str] = {}
-        fetched_auth_functions = {}
+        fetched_auth_functions = self._functions
         chained_auth_functions = defaultdict(list)
         for plugin in p.PluginImplementations(p.IAuthFunctions):
             for name, auth_function in plugin.get_auth_functions().items():

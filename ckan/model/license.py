@@ -351,7 +351,7 @@ class LicenseOpenGovernment(DefaultLicense):
 
 class LicenseCreativeCommonsNonCommercial(DefaultLicense):
     id = "cc-nc"
-    url = "http://creativecommons.org/licenses/by-nc/2.0/"
+    url = "https://creativecommons.org/licenses/by-nc/4.0/"
 
     @property
     def title(self):

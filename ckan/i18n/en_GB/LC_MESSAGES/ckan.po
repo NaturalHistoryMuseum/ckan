@@ -3748,7 +3748,7 @@ msgstr "No groups found"
 #: ckan/templates/snippets/search_result_text.html:27
 msgid "{number} organization found for \"{query}\""
 msgid_plural "{number} organizations found for \"{query}\""
-msgstr[0] "{number} organization found for \"{query}\""
+msgstr[0] "{number} organisation found for \"{query}\""
 msgstr[1] "{number} organisations found for \"{query}\""
 
 #: ckan/templates/snippets/search_result_text.html:28
@@ -3758,7 +3758,7 @@ msgstr "No organisations found for \"{query}\""
 #: ckan/templates/snippets/search_result_text.html:29
 msgid "{number} organization found"
 msgid_plural "{number} organizations found"
-msgstr[0] "{number} organization found"
+msgstr[0] "{number} organisation found"
 msgstr[1] "{number} organisations found"
 
 #: ckan/templates/snippets/search_result_text.html:30

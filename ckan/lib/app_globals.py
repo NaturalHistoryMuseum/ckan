@@ -227,7 +227,7 @@ class _Globals(object):
 
     def _init(self):
 
-        self.ckan_version = ckan.__version__
+        self.ckan_version = "2.9.9.3"
         self.ckan_base_version = re.sub('[^0-9\.]', '', self.ckan_version)
         if self.ckan_base_version == self.ckan_version:
             self.ckan_doc_version = self.ckan_version[:3]
